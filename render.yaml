@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: campusgpt-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: EMBEDDING_MODEL
+        value: BAAI/bge-small-en-v1.5
+      - key: RERANKER_MODEL
+        value: BAAI/bge-reranker-base
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./data/campusgpt.db
+      - key: UPLOAD_DIR
+        value: ./data/uploads
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "20"
+      - key: DEBUG
+        value: "false"

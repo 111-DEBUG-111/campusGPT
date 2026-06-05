@@ -1,0 +1,17 @@
+# University Academic Attendance Policy
+
+## 1. Minimum Attendance Requirement
+Every student is required to maintain a minimum of **75% attendance** in each course (including lectures, tutorials, and practicals) to be eligible to appear for the End-Semester Examinations.
+
+## 2. Attendance Shortage and De-registration
+- **Between 65% and 75%**: Students whose attendance falls in this range due to valid medical reasons or representing the university may request a waiver (see Section 3).
+- **Below 65%**: Under no circumstances will a student with less than 65% attendance be allowed to sit for the exams. The student will be de-registered from the course and will receive an 'F' (Fail) grade, requiring them to repeat the course in a summer semester or subsequent year.
+
+## 3. Approved Leaves & Relaxations
+Students can apply for two types of approved leaves:
+1. **Medical Leave (ML)**: Up to **10% relaxation** (reducing the threshold to 65%) may be granted by the Dean of Academics. Applications must be submitted along with an official medical certificate issued by a registered medical practitioner within 5 working days of returning to campus.
+2. **On-Duty Leave (OD)**: Granted to students representing the university in co-curricular, extra-curricular, sports, placements, or hackathons. OD must be approved in writing by the Head of Department (HOD) *prior* to the event. Approved ODs are counted as present for attendance calculation.
+
+## 4. Attendance Monitoring
+- Attendance is updated weekly by instructors on the University Student Portal.
+- Warning emails are automatically sent to students and parents/guardians when attendance falls below 80% at the mid-semester mark.
