@@ -22,6 +22,10 @@ class SourceCitation(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     conversation_id: Optional[int] = None
+    # Feature #5: Browser-generated UUID (Option A). The field is intentionally
+    # typed as Optional[str] so that a future auth middleware can populate it
+    # from a validated JWT `sub` without any schema change.
+    user_id: Optional[str] = Field(None, max_length=128)
 
 
 class ChatResponse(BaseModel):
@@ -30,6 +34,8 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceCitation]
     query_time_ms: float
+    # Feature #4: True when the answer was served from cache.
+    cached: bool = False
 
 
 class MessageOut(BaseModel):
@@ -37,6 +43,8 @@ class MessageOut(BaseModel):
     role: str
     content: str
     sources: list[SourceCitation]
+    # Feature #3: Full retrieved chunk data (useful for debugging / QA eval).
+    retrieved_chunks: list[dict] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -45,6 +53,9 @@ class MessageOut(BaseModel):
 class ConversationOut(BaseModel):
     id: int
     title: str
+    # Feature #5: surfaced so the frontend can verify ownership
+    user_id: Optional[str] = None
+    summary: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     messages: list[MessageOut] = []
@@ -55,6 +66,7 @@ class ConversationOut(BaseModel):
 class ConversationListItem(BaseModel):
     id: int
     title: str
+    user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
@@ -121,3 +133,15 @@ class AnalyticsSummary(BaseModel):
 class ReindexResponse(BaseModel):
     message: str
     documents_reindexed: int
+
+
+# ─── Memory (Feature #7 debug endpoint) ──────────────────────────────────────
+
+class MemoryOut(BaseModel):
+    id: int
+    conversation_id: int
+    content_summary: str
+    turn_range: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -26,10 +26,48 @@ class Base(DeclarativeBase):
     pass
 
 
+async def _migrate_existing_db(conn) -> None:
+    """
+    Safely add new nullable columns and tables to an existing SQLite database.
+
+    SQLite does not support adding columns with `ALTER TABLE ... ADD COLUMN`
+    unless the column is nullable or has a default value. All new columns here
+    satisfy that requirement.
+
+    TODO (post-MVP): Replace this with Alembic for versioned, production-grade
+    migrations when moving beyond the MVP stage.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    # Columns to add: (table, column, type_definition)
+    new_columns = [
+        ("conversations", "user_id",             "VARCHAR(128)"),
+        ("conversations", "summary",              "TEXT"),
+        ("conversations", "summary_updated_at",   "DATETIME"),
+        ("messages",      "retrieved_chunks_json", "TEXT"),
+    ]
+
+    for table, col, col_type in new_columns:
+        try:
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
+                )
+            )
+            log.info(f"Migration: added column {table}.{col}")
+        except Exception:
+            # Column already exists — this is expected on subsequent startups.
+            pass
+
+
 async def init_db() -> None:
-    """Create all tables on startup."""
+    """Create all tables on startup and apply lightweight column migrations."""
     async with engine.begin() as conn:
+        # 1. Create new tables (IF NOT EXISTS — safe to repeat)
         await conn.run_sync(Base.metadata.create_all)
+        # 2. Add new nullable columns to existing tables
+        await _migrate_existing_db(conn)
 
 
 async def get_db():

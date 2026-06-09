@@ -2,6 +2,10 @@
 Full RAG Pipeline Orchestrator for CampusGPT.
 
 Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → Gemini Response
+
+Feature additions vs original:
+  - Accepts conversation_summary and relevant_memories for richer context
+  - Returns raw chunks list so the caller can store them (Feature #3)
 """
 import logging
 import json
@@ -15,6 +19,9 @@ from app.schemas import SourceCitation
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
+# ─── System Prompt ────────────────────────────────────────────────────────────
+# Sections are conditionally populated — empty sections are omitted at runtime.
 
 SYSTEM_PROMPT = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
 
@@ -30,7 +37,7 @@ Guidelines:
 
 Context from university knowledge base:
 {context}
-
+{summary_section}{memory_section}
 Conversation history:
 {history}
 """
@@ -88,18 +95,23 @@ def chunks_to_citations(chunks: list[dict]) -> list[SourceCitation]:
 def run_rag_pipeline(
     query: str,
     conversation_history: list[dict] | None = None,
+    conversation_summary: str | None = None,
+    relevant_memories: list[str] | None = None,
 ) -> dict:
     """
     Full RAG pipeline.
 
     Args:
-        query: User's question
-        conversation_history: List of {"role": str, "content": str} dicts
+        query: User's question.
+        conversation_history: Recent messages as {role, content} dicts (Feature #1).
+        conversation_summary: Running summary for long conversations (Feature #2).
+        relevant_memories: Top-K memory entries retrieved for this query (Feature #7).
 
     Returns:
         {
             "answer": str,
             "sources": list[SourceCitation],
+            "chunks": list[dict],   ← raw chunks for storage (Feature #3)
             "retrieved_chunks": int,
             "query_time_ms": float,
         }
@@ -124,11 +136,32 @@ def run_rag_pipeline(
     context = format_context(chunks)
     history_text = format_history(history)
 
+    # Build optional prompt sections — only include if content exists
+    summary_section = ""
+    if conversation_summary:
+        summary_section = (
+            f"\nConversation summary (covers earlier context):\n{conversation_summary}\n"
+        )
+
+    memory_section = ""
+    if relevant_memories:
+        from app.services.memory_service import format_memories
+        formatted = format_memories(relevant_memories)
+        if formatted:
+            memory_section = (
+                f"\nRelevant past conversation memories:\n{formatted}\n"
+            )
+
     # ── Step 4: Gemini Response ────────────────────────────────────────────────
     genai.configure(api_key=settings.gemini_api_key)
     model = genai.GenerativeModel(settings.gemini_model)
 
-    prompt = SYSTEM_PROMPT.format(context=context, history=history_text)
+    prompt = SYSTEM_PROMPT.format(
+        context=context,
+        history=history_text,
+        summary_section=summary_section,
+        memory_section=memory_section,
+    )
 
     try:
         response = model.generate_content(
@@ -152,6 +185,7 @@ def run_rag_pipeline(
     return {
         "answer": answer,
         "sources": citations,
+        "chunks": chunks,           # Feature #3: raw chunks for storage
         "retrieved_chunks": len(chunks),
         "query_time_ms": elapsed_ms,
     }

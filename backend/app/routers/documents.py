@@ -16,6 +16,7 @@ from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
 from app.services.document_service import (
     save_upload, process_document, delete_document, rebuild_bm25_from_qdrant
 )
+from app.services.cache_service import bump_knowledge_version
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -96,6 +97,10 @@ async def upload_document(
                     category=category,
                     db=bg_db,
                 )
+                # Feature #4: bump knowledge version after successful indexing
+                # so all cached responses that pre-date this document are invalidated.
+                await bump_knowledge_version(bg_db)
+                await bg_db.commit()
             except Exception as e:
                 logger.error(f"Background indexing failed for doc {doc.id}: {e}")
 
@@ -129,6 +134,10 @@ async def delete_doc(
         raise HTTPException(status_code=404, detail="Document not found")
 
     await delete_document(document_id, db)
+    # Feature #4: bump knowledge version so cached answers referencing this
+    # document are immediately invalidated.
+    await bump_knowledge_version(db)
+    await db.commit()
 
 
 @router.post("/reindex", response_model=ReindexResponse)
@@ -141,6 +150,9 @@ async def reindex_all(
     Does NOT re-embed documents — use delete + re-upload for that.
     """
     chunk_count = await rebuild_bm25_from_qdrant()
+    # Feature #4: reindexing changes the knowledge base — invalidate cache.
+    await bump_knowledge_version(db)
+    await db.commit()
     result = await db.execute(
         select(Document).where(Document.status == "indexed")
     )

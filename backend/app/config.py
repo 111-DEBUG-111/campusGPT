@@ -61,6 +61,26 @@ class Settings(BaseSettings):
     max_context_chunks: int = 5
     max_query_rewrites: int = 3
 
+    # ─── Conversation History (Feature #1) ───────────────────────────────────
+    # Number of most-recent messages sent to the LLM as conversation context.
+    history_window: int = 10
+
+    # ─── Conversation Summarization (Feature #2) ──────────────────────────────
+    # Total message count that triggers background summarization.
+    summarize_threshold: int = 50
+
+    # ─── Response Cache (Feature #4) ──────────────────────────────────────────
+    # How long a cached response is valid (seconds). Default: 24 hours.
+    cache_ttl_seconds: int = 86400
+    # Minimum cosine similarity to consider a query a cache hit.
+    cache_similarity_threshold: float = 0.97
+    # Max entries kept in the in-memory LRU cache.
+    cache_max_memory_entries: int = 500
+
+    # ─── Memory Retrieval (Feature #7) ────────────────────────────────────────
+    # Number of long-term memory entries retrieved per query.
+    memory_retrieval_top_k: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:
