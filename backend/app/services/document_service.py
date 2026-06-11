@@ -2,7 +2,9 @@
 Document Service — Orchestrates upload → parse → embed → index → store.
 """
 import logging
+import re
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import UploadFile
@@ -21,20 +23,48 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _safe_filename(original: str) -> str:
+    """
+    Return a safe, UUID-prefixed filename for storage.
+
+    Security measures applied:
+      1. Strip all directory components (prevents path traversal like ../../etc/passwd).
+      2. Remove any character that isn't alphanumeric, a dot, hyphen, or underscore.
+      3. Prepend a UUID4 so the stored path is unguessable and collision-free.
+    """
+    # 1. Strip directory components — only keep the bare filename
+    name = Path(original).name
+    # 2. Allow only safe characters; replace everything else with underscores
+    name = re.sub(r"[^\w.\-]", "_", name)
+    # 3. Collapse consecutive underscores for readability
+    name = re.sub(r"_+", "_", name).strip("_")
+    # 4. Fallback for degenerate inputs
+    if not name:
+        name = "upload"
+    # 5. Prepend UUID — stored filename is never just the user's string
+    return f"{uuid.uuid4().hex}_{name}"
+
+
 async def save_upload(file: UploadFile, upload_dir: Path) -> tuple[Path, int]:
-    """Save an uploaded file to disk, return (path, size_bytes)."""
+    """Save an uploaded file to disk with a sanitised UUID-based name.
+
+    Returns (stored_path, size_bytes).  The caller must persist
+    ``file.filename`` (the *original* name) separately for display purposes.
+    """
     upload_dir.mkdir(parents=True, exist_ok=True)
-    dest = upload_dir / file.filename
-    # Avoid overwriting — append suffix if needed
-    counter = 1
+
+    safe_name = _safe_filename(file.filename or "upload")
+    dest = upload_dir / safe_name
+    # UUID prefix makes collisions astronomically unlikely, but guard anyway
     while dest.exists():
-        stem = Path(file.filename).stem
-        suffix = Path(file.filename).suffix
-        dest = upload_dir / f"{stem}_{counter}{suffix}"
-        counter += 1
+        safe_name = _safe_filename(file.filename or "upload")
+        dest = upload_dir / safe_name
 
     content = await file.read()
     dest.write_bytes(content)
+    logger.info(
+        f"Saved upload '{file.filename}' → '{dest.name}' ({len(content)} bytes)"
+    )
     return dest, len(content)
 
 

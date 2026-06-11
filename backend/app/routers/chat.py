@@ -3,12 +3,14 @@ Chat Router — POST /api/chat, GET /api/conversations
 """
 import json
 import logging
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from starlette.concurrency import run_in_threadpool
 
+from app.config import get_settings
 from app.database import get_db
+from app.limiter import limiter
 from app.models import Conversation, Message
 from app.schemas import (
     ChatRequest, ChatResponse, ConversationOut,
@@ -18,30 +20,34 @@ from app.rag.pipeline import run_rag_pipeline
 from app.services.analytics_service import log_event
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def chat(
-    request: ChatRequest,
+    request: Request,          # required by slowapi for IP extraction
+    body: ChatRequest,         # renamed from `request` to avoid collision
     db: AsyncSession = Depends(get_db),
 ):
     """
     Main chat endpoint.
     Creates or continues a conversation, runs the full RAG pipeline,
     stores messages, and returns the answer with citations.
+    Rate-limited per IP: controlled by RATE_LIMIT_PER_MINUTE env var.
     """
     # ── Get or create conversation ───────────────────────────────────────────
-    if request.conversation_id:
+    if body.conversation_id:
         result = await db.execute(
-            select(Conversation).where(Conversation.id == request.conversation_id)
+            select(Conversation).where(Conversation.id == body.conversation_id)
         )
         conversation = result.scalar_one_or_none()
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         # Auto-title from first message
-        title = request.query[:60] + ("..." if len(request.query) > 60 else "")
+        title = body.query[:60] + ("..." if len(body.query) > 60 else "")
         conversation = Conversation(title=title)
         db.add(conversation)
         await db.flush()
@@ -60,14 +66,14 @@ async def chat(
     user_message = Message(
         conversation_id=conversation.id,
         role="user",
-        content=request.query,
+        content=body.query,
     )
     db.add(user_message)
     await db.flush()
 
     # ── Run RAG pipeline ──────────────────────────────────────────────────────
     try:
-        result = await run_in_threadpool(run_rag_pipeline, request.query, history)
+        result = await run_in_threadpool(run_rag_pipeline, body.query, history)
     except Exception as e:
         logger.error(f"RAG pipeline error: {e}")
         raise HTTPException(status_code=500, detail="RAG pipeline failed. Please try again.")
@@ -88,7 +94,7 @@ async def chat(
     await log_event(
         db=db,
         event_type="query",
-        query=request.query,
+        query=body.query,
         conversation_id=conversation.id,
         response_time_ms=result["query_time_ms"],
         retrieved_chunks=result["retrieved_chunks"],
@@ -104,7 +110,9 @@ async def chat(
 
 
 @router.get("/conversations", response_model=list[ConversationListItem])
+@limiter.limit("60/minute")   # frontend polls this for sidebar — relaxed
 async def list_conversations(
+    request: Request,          # required by slowapi for IP extraction
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
@@ -137,7 +145,9 @@ async def list_conversations(
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)
+@limiter.limit("60/minute")   # read-only — relaxed
 async def get_conversation(
+    request: Request,          # required by slowapi for IP extraction
     conversation_id: int,
     db: AsyncSession = Depends(get_db),
 ):
@@ -175,7 +185,9 @@ async def get_conversation(
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
+@limiter.limit("20/minute")   # destructive — moderate cap
 async def delete_conversation(
+    request: Request,          # required by slowapi for IP extraction
     conversation_id: int,
     db: AsyncSession = Depends(get_db),
 ):

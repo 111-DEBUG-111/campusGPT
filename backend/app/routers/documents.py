@@ -5,12 +5,13 @@ Protected by ADMIN_API_KEY header.
 import logging
 from pathlib import Path
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_db, AsyncSessionLocal
+from app.limiter import limiter
 from app.models import Document
 from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
 from app.services.document_service import (
@@ -32,7 +33,9 @@ def verify_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
 
 
 @router.post("/upload", response_model=DocumentOut)
+@limiter.limit("10/minute")   # admin uploads: conservative limit to protect the embedding queue
 async def upload_document(
+    request: Request,          # required by slowapi for IP extraction
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     category: str = Form(default="general"),
@@ -104,7 +107,9 @@ async def upload_document(
 
 
 @router.get("/documents", response_model=DocumentListResponse)
+@limiter.limit("60/minute")   # read-only, cheap — relaxed limit
 async def list_documents(
+    request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
 ):
@@ -117,7 +122,9 @@ async def list_documents(
 
 
 @router.delete("/documents/{document_id}", status_code=204)
+@limiter.limit("20/minute")   # destructive — moderate cap
 async def delete_doc(
+    request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
@@ -132,7 +139,9 @@ async def delete_doc(
 
 
 @router.post("/reindex", response_model=ReindexResponse)
+@limiter.limit("3/minute")    # STRICTEST: triggers full BM25 rebuild — very expensive
 async def reindex_all(
+    request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
 ):
@@ -152,7 +161,9 @@ async def reindex_all(
 
 
 @router.get("/documents/{document_id}", response_model=DocumentOut)
+@limiter.limit("60/minute")   # read-only, cheap — relaxed limit
 async def get_document(
+    request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
