@@ -11,6 +11,7 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue, MatchAny,
     SearchRequest, ScoredPoint,
+    PayloadSchemaType,
 )
 from app.config import get_settings
 from app.rag.embedder import get_embedder
@@ -40,7 +41,7 @@ class QdrantVectorStore:
         logger.info("Qdrant connected ✓")
 
     def _ensure_collection(self):
-        """Create collection if it doesn't already exist."""
+        """Create collection if it doesn't already exist, then ensure payload indexes."""
         embedder = get_embedder()
         existing = [c.name for c in self.client.get_collections().collections]
 
@@ -54,6 +55,15 @@ class QdrantVectorStore:
                 ),
             )
             logger.info("Collection created ✓")
+
+        # Ensure payload index on document_id so filter-based deletes work.
+        # create_payload_index is idempotent — safe to call even if already present.
+        self.client.create_payload_index(
+            collection_name=self.collection,
+            field_name="document_id",
+            field_schema=PayloadSchemaType.INTEGER,
+        )
+        logger.info("Payload index on 'document_id' ensured ✓")
 
     # ─── Upsert ───────────────────────────────────────────────────────────────
 
