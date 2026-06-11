@@ -2,11 +2,12 @@
 Analytics Router — GET /api/admin/analytics
 """
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.limiter import limiter
 from app.schemas import AnalyticsSummary
 from app.services.analytics_service import get_analytics_summary
 
@@ -20,7 +21,9 @@ def verify_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
 
 
 @router.get("/analytics", response_model=AnalyticsSummary)
+@limiter.limit("10/minute")   # heavy DB aggregation — cap dashboard polling
 async def analytics_dashboard(
+    request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
 ):

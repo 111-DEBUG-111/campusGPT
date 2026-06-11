@@ -130,10 +130,13 @@ class Embedder:
         start_time = time.time()
         
         try:
+            if num_docs > 100:
+                logger.info(f"Embedding {num_docs} chunks in batches of {batch_size}…")
             embeddings = self.model.encode(
-                texts, 
+                texts,
                 batch_size=batch_size,
-                show_progress_bar=num_docs > 100  # Only show for large batches
+                # show_progress_bar removed — not supported by FlagModel.encode()
+                # in the current FlagEmbedding version; progress logged manually above
             )
         except MemoryError as e:
             logger.error(f"❌ Out of memory during embedding: {e}")
