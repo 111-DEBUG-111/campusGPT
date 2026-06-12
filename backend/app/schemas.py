@@ -15,6 +15,11 @@ class SourceCitation(BaseModel):
     page_number: Optional[int] = None
     chunk_text: str
     relevance_score: float
+    # Section metadata — populated for semantically-chunked documents.
+    # None for legacy chunks ingested before the semantic chunker.
+    section_title: Optional[str] = None   # immediate heading (e.g. "2.1 Grading")
+    section_path: Optional[str] = None    # breadcrumb (e.g. "Academics > 2.1 Grading")
+    chunk_type: Optional[str] = None      # "text" | "table" | "heading_intro"
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────

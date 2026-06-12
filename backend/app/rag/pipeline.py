@@ -37,15 +37,20 @@ Conversation history:
 
 
 def format_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into a readable context block."""
+    """Format retrieved chunks into a readable context block for Gemini."""
     if not chunks:
         return "No relevant documents found in the knowledge base."
 
     context_parts = []
     for i, chunk in enumerate(chunks, start=1):
+        # Build source label: filename + page + section breadcrumb
         source_info = f"[Source {i}: {chunk['filename']}"
         if chunk.get("page_number"):
             source_info += f", Page {chunk['page_number']}"
+        if chunk.get("section_path"):
+            source_info += f", Section: {chunk['section_path']}"
+        elif chunk.get("section_title"):
+            source_info += f", Section: {chunk['section_title']}"
         source_info += f", Category: {chunk['category']}]"
 
         context_parts.append(f"{source_info}\n{chunk['text']}")
@@ -69,7 +74,7 @@ def chunks_to_citations(chunks: list[dict]) -> list[SourceCitation]:
     seen = set()
     citations = []
     for chunk in chunks:
-        key = f"{chunk['filename']}:{chunk.get('page_number')}"
+        key = f"{chunk['filename']}:{chunk.get('page_number')}:{chunk.get('section_title')}"
         if key not in seen:
             seen.add(key)
         citations.append(
@@ -80,6 +85,10 @@ def chunks_to_citations(chunks: list[dict]) -> list[SourceCitation]:
                 page_number=chunk.get("page_number"),
                 chunk_text=chunk["text"][:300] + ("..." if len(chunk["text"]) > 300 else ""),
                 relevance_score=round(chunk.get("rerank_score", chunk.get("rrf_score", 0.0)), 4),
+                # Section metadata (None for legacy chunks)
+                section_title=chunk.get("section_title"),
+                section_path=chunk.get("section_path"),
+                chunk_type=chunk.get("chunk_type"),
             )
         )
     return citations

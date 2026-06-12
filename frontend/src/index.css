@@ -395,6 +395,36 @@ body {
   color: #64748b;
 }
 
+/* Section breadcrumb row — shown below the header, always visible */
+.citation-section-path {
+  @apply flex items-center gap-1.5 px-3 py-1.5;
+  background-color: rgba(99, 102, 241, 0.05);
+  border-top: 1px solid rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-section-path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chunk-type icon variants */
+.citation-chunk-icon {
+  flex-shrink: 0;
+}
+.citation-chunk-table {
+  color: #06b6d4;  /* cyan — tables */
+}
+.citation-chunk-heading {
+  color: #818cf8;  /* indigo — heading intros */
+}
+
 /* ─── Feedback ───────────────────────────────────────────────────────────── */
 .feedback-buttons {
   @apply flex items-center gap-2 mt-2;
