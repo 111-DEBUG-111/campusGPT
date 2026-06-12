@@ -52,12 +52,20 @@ async def chat(
         db.add(conversation)
         await db.flush()
 
-    # ── Load conversation history ─────────────────────────────────────────────
-    history_result = await db.execute(
+    # ── Load conversation history (last 5 turns = 10 messages) ───────────────
+    # Subquery: grab the 10 most-recent messages ordered DESC
+    recent_subq = (
         select(Message)
         .where(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.desc())
+        .limit(10)
+        .subquery()
+    )
+    # Outer query: re-order them ASC so the LLM sees correct chronology
+    history_result = await db.execute(
+        select(Message)
+        .where(Message.id.in_(select(recent_subq.c.id)))
         .order_by(Message.created_at.asc())
-        .limit(10)  # Last 5 turns
     )
     history_messages = history_result.scalars().all()
     history = [{"role": m.role, "content": m.content} for m in history_messages]
