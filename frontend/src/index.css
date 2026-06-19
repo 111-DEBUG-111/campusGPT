@@ -113,10 +113,54 @@ body {
   color: #475569;
 }
 .conv-delete-btn {
-  @apply opacity-0 group-hover:opacity-100 p-1 rounded transition-all duration-150;
+  @apply p-1 rounded transition-all duration-150;
   color: #475569;
+  opacity: 0;
 }
-.conv-delete-btn:hover { color: #ef4444; }
+.conv-item:hover .conv-delete-btn { opacity: 1; }
+.conv-delete-btn:hover { color: #ef4444; background-color: rgba(239, 68, 68, 0.1); }
+
+/* Inline delete confirmation */
+.conv-delete-confirm {
+  @apply flex items-center justify-between px-3 py-2 rounded-xl mb-0.5;
+  background-color: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  animation: fadeIn 0.15s ease-out;
+}
+.conv-delete-confirm-inner {
+  @apply flex items-center gap-1.5;
+}
+.conv-delete-confirm-text {
+  font-size: 12px;
+  color: #fca5a5;
+  font-weight: 500;
+}
+.conv-delete-confirm-actions {
+  @apply flex items-center gap-1.5;
+}
+.conv-delete-confirm-cancel {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: #1f2330;
+  transition: background-color 0.15s;
+}
+.conv-delete-confirm-cancel:hover { background-color: #2a2d3a; }
+.conv-delete-confirm-ok {
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: #ef4444;
+  transition: background-color 0.15s;
+}
+.conv-delete-confirm-ok:hover:not(:disabled) { background-color: #dc2626; }
+.conv-delete-confirm-ok:disabled,
+.conv-delete-confirm-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
+
 
 .sidebar-footer {
   @apply flex flex-col gap-1 p-3 border-t;
@@ -393,6 +437,36 @@ body {
 .citation-excerpt p {
   @apply text-xs leading-relaxed pt-3;
   color: #64748b;
+}
+
+/* Section breadcrumb row — shown below the header, always visible */
+.citation-section-path {
+  @apply flex items-center gap-1.5 px-3 py-1.5;
+  background-color: rgba(99, 102, 241, 0.05);
+  border-top: 1px solid rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-section-path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chunk-type icon variants */
+.citation-chunk-icon {
+  flex-shrink: 0;
+}
+.citation-chunk-table {
+  color: #06b6d4;  /* cyan — tables */
+}
+.citation-chunk-heading {
+  color: #818cf8;  /* indigo — heading intros */
 }
 
 /* ─── Feedback ───────────────────────────────────────────────────────────── */
