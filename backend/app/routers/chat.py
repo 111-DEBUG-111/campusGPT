@@ -1,5 +1,6 @@
 """
-Chat Router — POST /api/chat, GET /api/conversations
+Chat Router — POST /api/chat, GET/DELETE /api/conversations
+All conversation endpoints are scoped to the caller's session token.
 """
 import json
 import logging
@@ -10,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import get_session_token
 from app.limiter import limiter
 from app.models import Conversation, Message
 from app.schemas import (
@@ -24,31 +26,54 @@ settings = get_settings()
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _get_owned_conversation(
+    conversation_id: int,
+    session_token: str,
+    db: AsyncSession,
+) -> Conversation:
+    """
+    Fetch a conversation that belongs to the given session token.
+    Returns 404 in both the "not found" and "wrong owner" cases
+    to avoid leaking whether a conversation ID exists.
+    """
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv or conv.session_id != session_token:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def chat(
     request: Request,          # required by slowapi for IP extraction
     body: ChatRequest,         # renamed from `request` to avoid collision
     db: AsyncSession = Depends(get_db),
+    session_token: str = Depends(get_session_token),
 ):
     """
     Main chat endpoint.
     Creates or continues a conversation, runs the full RAG pipeline,
     stores messages, and returns the answer with citations.
+    Conversations are strictly scoped to the caller's session token.
     Rate-limited per IP: controlled by RATE_LIMIT_PER_MINUTE env var.
     """
     # ── Get or create conversation ───────────────────────────────────────────
     if body.conversation_id:
-        result = await db.execute(
-            select(Conversation).where(Conversation.id == body.conversation_id)
+        # Ownership check: session_token must match
+        conversation = await _get_owned_conversation(
+            body.conversation_id, session_token, db
         )
-        conversation = result.scalar_one_or_none()
-        if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         # Auto-title from first message
         title = body.query[:60] + ("..." if len(body.query) > 60 else "")
-        conversation = Conversation(title=title)
+        conversation = Conversation(title=title, session_id=session_token)
         db.add(conversation)
         await db.flush()
 
@@ -124,10 +149,12 @@ async def list_conversations(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    session_token: str = Depends(get_session_token),
 ):
-    """List all conversations with message counts."""
+    """List conversations that belong to the caller's session."""
     result = await db.execute(
         select(Conversation)
+        .where(Conversation.session_id == session_token)   # ← isolation
         .order_by(Conversation.updated_at.desc())
         .offset(skip)
         .limit(limit)
@@ -158,14 +185,10 @@ async def get_conversation(
     request: Request,          # required by slowapi for IP extraction
     conversation_id: int,
     db: AsyncSession = Depends(get_db),
+    session_token: str = Depends(get_session_token),
 ):
-    """Get a conversation with all its messages."""
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conversation = result.scalar_one_or_none()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    """Get a conversation with all its messages (must be owned by caller)."""
+    conversation = await _get_owned_conversation(conversation_id, session_token, db)
 
     msg_result = await db.execute(
         select(Message)
@@ -198,13 +221,9 @@ async def delete_conversation(
     request: Request,          # required by slowapi for IP extraction
     conversation_id: int,
     db: AsyncSession = Depends(get_db),
+    session_token: str = Depends(get_session_token),
 ):
-    """Delete a conversation and all its messages."""
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conv = result.scalar_one_or_none()
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    """Delete a conversation and all its messages (must be owned by caller)."""
+    conv = await _get_owned_conversation(conversation_id, session_token, db)
     await db.delete(conv)
     await db.commit()
