@@ -15,7 +15,7 @@ from app.limiter import limiter
 from app.models import Document
 from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
 from app.services.document_service import (
-    save_upload, process_document, delete_document, rebuild_bm25_from_qdrant
+    save_upload, process_document, delete_document, rebuild_bm25_from_vectorstore
 )
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ async def delete_doc(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin),
 ):
-    """Delete a document from disk, Qdrant, BM25, and DB."""
+    """Delete a document from pgvector, BM25, R2 storage, and DB."""
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if not doc:
@@ -145,10 +145,10 @@ async def reindex_all(
     _: None = Depends(verify_admin),
 ):
     """
-    Rebuild BM25 index from Qdrant (useful after manual data changes).
+    Rebuild BM25 index from pgvector (useful after manual data changes).
     Does NOT re-embed documents — use delete + re-upload for that.
     """
-    chunk_count = await rebuild_bm25_from_qdrant()
+    chunk_count = await rebuild_bm25_from_vectorstore()
     result = await db.execute(
         select(Document).where(Document.status == "indexed")
     )

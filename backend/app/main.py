@@ -25,7 +25,7 @@ from app.rag.embedder import get_embedder
 from app.rag.vectorstore import get_vectorstore
 from app.rag.bm25_index import get_bm25_index
 from app.rag.reranker import get_reranker
-from app.services.document_service import rebuild_bm25_from_qdrant
+from app.services.document_service import rebuild_bm25_from_vectorstore
 
 # Import all routers
 from app.routers import chat, documents, feedback, analytics, health
@@ -59,13 +59,13 @@ async def lifespan(app: FastAPI):
     logger.info("Loading embedding model...")
     get_embedder()
 
-    # 3. Connect to Qdrant
-    logger.info("Connecting to Qdrant...")
+    # 3. Connect to pgvector (initialise singleton, verifies DB reachability)
+    logger.info("Initialising pgvector store...")
     get_vectorstore()
 
-    # 4. Rebuild BM25 from Qdrant
-    logger.info("Rebuilding BM25 index from Qdrant...")
-    await rebuild_bm25_from_qdrant()
+    # 4. Rebuild BM25 from pgvector
+    logger.info("Rebuilding BM25 index from pgvector...")
+    await rebuild_bm25_from_vectorstore()
 
     # 5. Load reranker
     logger.info("Loading reranker model...")

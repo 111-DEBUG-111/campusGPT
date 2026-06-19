@@ -75,7 +75,7 @@ async def process_document(
     db: AsyncSession,
 ) -> int:
     """
-    Background processing: download from R2 → ingest → embed → upsert into Qdrant → update BM25.
+    Background processing: download from R2 → ingest → embed → upsert into pgvector → update BM25.
     Uses a temporary local file for the ingestion step (ingestion libs need a real Path).
     Returns number of chunks indexed.
     """
@@ -124,7 +124,7 @@ async def process_document(
         for chunk, embedding in zip(chunks, embeddings):
             chunk["embedding"] = embedding
 
-        # ── Upsert into Qdrant ────────────────────────────────────────────────
+        # ── Upsert into pgvector ─────────────────────────────────────────────────
         vectorstore = get_vectorstore()
         await run_in_threadpool(vectorstore.upsert_chunks, chunks)
 
@@ -166,7 +166,7 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
     if not doc:
         return
 
-    # Delete from Qdrant
+    # Delete from pgvector
     vectorstore = get_vectorstore()
     await run_in_threadpool(vectorstore.delete_by_document_id, document_id)
 
@@ -183,12 +183,12 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
     logger.info(f"Document {document_id} (key={doc.filename}) deleted")
 
 
-async def rebuild_bm25_from_qdrant() -> int:
-    """Rebuild BM25 in-memory index from all Qdrant chunks (used on startup)."""
+async def rebuild_bm25_from_vectorstore() -> int:
+    """Rebuild BM25 in-memory index from all pgvector chunks (used on startup)."""
     vectorstore = get_vectorstore()
     bm25 = get_bm25_index()
 
     chunks = await run_in_threadpool(vectorstore.fetch_all_chunks)
     bm25.build_from_chunks(chunks)
-    logger.info(f"BM25 rebuilt from Qdrant: {len(chunks)} chunks")
+    logger.info(f"BM25 rebuilt from pgvector: {len(chunks)} chunks")
     return len(chunks)

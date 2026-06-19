@@ -105,3 +105,9 @@ class AnalyticsEvent(Base):
     response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     retrieved_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+# NOTE: document_chunks table is managed via raw DDL in database.py
+# (see _apply_migrations). It uses the pgvector `vector` column type which
+# requires the extension to be enabled first — handled there.
+# We do not define an ORM model for it to avoid the pgvector Python package
+# dependency; all vector ops use raw SQL via asyncpg.

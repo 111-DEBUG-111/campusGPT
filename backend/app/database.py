@@ -55,16 +55,63 @@ async def _apply_migrations(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_conversations_session_id
             ON conversations (session_id)
         """,
+
+        # v1.2 — document_chunks table for pgvector storage
+        # Created here (not via ORM) so we can use the `vector(1024)` column
+        # type without requiring the pgvector Python package in SQLAlchemy.
+        # Hardcoded dim=1024 for BAAI/bge-m3.
+        """
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id             VARCHAR(36)   PRIMARY KEY,
+            document_id    INTEGER       NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            filename       VARCHAR(255)  NOT NULL,
+            category       VARCHAR(100)  NOT NULL,
+            text           TEXT          NOT NULL,
+            embedding      vector(1024)  NOT NULL,
+            page_number    INTEGER,
+            chunk_index    INTEGER       NOT NULL DEFAULT 0,
+            section_title  VARCHAR(500),
+            section_path   VARCHAR(1000),
+            chunk_type     VARCHAR(50)   NOT NULL DEFAULT 'text',
+            heading_level  INTEGER
+        )
+        """,
+
+        # v1.2a — metadata indexes on document_chunks
+        "CREATE INDEX IF NOT EXISTS ix_dc_document_id ON document_chunks (document_id)",
+        "CREATE INDEX IF NOT EXISTS ix_dc_category     ON document_chunks (category)",
+        "CREATE INDEX IF NOT EXISTS ix_dc_section_title ON document_chunks (section_title)",
+        "CREATE INDEX IF NOT EXISTS ix_dc_chunk_type   ON document_chunks (chunk_type)",
+
+        # v1.2b — IVFFlat index for cosine ANN search on document_chunks
+        # lists=100 is a good default up to ~1M vectors; tune upward if needed.
+        """
+        CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding
+            ON document_chunks
+            USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = 100)
+        """,
     ]
     for sql in migrations:
         await conn.execute(text(sql))
 
 
 async def init_db() -> None:
-    """Create all tables, then apply incremental column migrations."""
+    """
+    Initialise the database:
+      1. Enable the pgvector extension (must happen before create_all so
+         the `vector` column type is available when creating document_chunks).
+      2. Create all missing tables via SQLAlchemy metadata.
+      3. Apply incremental column / index migrations.
+    """
     async with engine.begin() as conn:
+        # Step 1 — pgvector extension (idempotent)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        # Step 2 — create tables
         await conn.run_sync(Base.metadata.create_all)
+        # Step 3 — incremental migrations
         await _apply_migrations(conn)
+
 
 
 async def get_db():
