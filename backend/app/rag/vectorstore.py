@@ -11,6 +11,7 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue, MatchAny,
     SearchRequest, ScoredPoint,
+    PayloadSchemaType,
 )
 from app.config import get_settings
 from app.rag.embedder import get_embedder
@@ -40,7 +41,7 @@ class QdrantVectorStore:
         logger.info("Qdrant connected ✓")
 
     def _ensure_collection(self):
-        """Create collection if it doesn't already exist."""
+        """Create collection if it doesn't already exist, then ensure payload indexes."""
         embedder = get_embedder()
         existing = [c.name for c in self.client.get_collections().collections]
 
@@ -55,15 +56,33 @@ class QdrantVectorStore:
             )
             logger.info("Collection created ✓")
 
+        # Ensure payload indexes.
+        # All calls are idempotent — safe on every startup regardless of
+        # whether the collection is new or pre-existing.
+        _indexes = [
+            ("document_id", PayloadSchemaType.INTEGER),
+            ("section_title", PayloadSchemaType.KEYWORD),
+            ("chunk_type", PayloadSchemaType.KEYWORD),
+        ]
+        for field_name, schema in _indexes:
+            self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name=field_name,
+                field_schema=schema,
+            )
+        logger.info("Payload indexes ensured ✓ (document_id, section_title, chunk_type)")
+
     # ─── Upsert ───────────────────────────────────────────────────────────────
 
     def upsert_chunks(self, chunks: list[dict]) -> int:
         """
         Upsert document chunks into Qdrant.
 
-        Each chunk dict must have:
-            text, embedding, document_id, filename, category,
-            page_number (optional), chunk_index
+        Required keys per chunk: text, embedding, document_id, filename,
+        category, chunk_index.
+        Optional keys (new semantic fields): page_number, section_title,
+        section_path, chunk_type, heading_level.
+        Missing optional keys default to None / "text" gracefully.
         """
         if not chunks:
             return 0
@@ -81,6 +100,11 @@ class QdrantVectorStore:
                         "category": chunk["category"],
                         "page_number": chunk.get("page_number"),
                         "chunk_index": chunk["chunk_index"],
+                        # ── Semantic metadata (new) ──────────────────────────
+                        "section_title": chunk.get("section_title"),
+                        "section_path": chunk.get("section_path"),
+                        "chunk_type": chunk.get("chunk_type", "text"),
+                        "heading_level": chunk.get("heading_level"),
                     },
                 )
             )
@@ -129,6 +153,11 @@ class QdrantVectorStore:
                 "category": r.payload["category"],
                 "page_number": r.payload.get("page_number"),
                 "chunk_index": r.payload.get("chunk_index", 0),
+                # Semantic metadata — None for legacy chunks without these fields
+                "section_title": r.payload.get("section_title"),
+                "section_path": r.payload.get("section_path"),
+                "chunk_type": r.payload.get("chunk_type", "text"),
+                "heading_level": r.payload.get("heading_level"),
             }
             for r in results
         ]
@@ -168,6 +197,11 @@ class QdrantVectorStore:
                 "category": r.payload["category"],
                 "page_number": r.payload.get("page_number"),
                 "chunk_index": r.payload.get("chunk_index", 0),
+                # Semantic metadata — None for legacy chunks
+                "section_title": r.payload.get("section_title"),
+                "section_path": r.payload.get("section_path"),
+                "chunk_type": r.payload.get("chunk_type", "text"),
+                "heading_level": r.payload.get("heading_level"),
             }
             for r in records
         ]

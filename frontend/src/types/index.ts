@@ -6,6 +6,10 @@ export interface SourceCitation {
   page_number: number | null;
   chunk_text: string;
   relevance_score: number;
+  // Section metadata — present for semantically-chunked documents, undefined for legacy
+  section_title?: string | null;
+  section_path?: string | null;
+  chunk_type?: string | null;
 }
 
 export interface Message {

@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
 
     # ─── Embeddings ───────────────────────────────────────────────────────────
-    # Default: bge-small-en-v1.5 (~120MB, fits Render free 512MB)
-    # Override to "BAAI/bge-m3" when self-hosting with more RAM
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # bge-m3: 1024-dim, up to 8192 tokens — production quality
+    # bge-small-en-v1.5: 384-dim, 512 tokens — low-memory fallback (~120MB)
+    embedding_model: str = "BAAI/bge-m3"
 
     # ─── Reranker ─────────────────────────────────────────────────────────────
     reranker_model: str = "BAAI/bge-reranker-base"
@@ -61,8 +61,14 @@ class Settings(BaseSettings):
 
     # ─── Upload ───────────────────────────────────────────────────────────────
     max_upload_size_mb: int = 50
-    chunk_size: int = 512          # tokens per chunk
-    chunk_overlap: int = 64        # token overlap between chunks
+
+    # ─── Chunking ─────────────────────────────────────────────────────────────
+    # Tune these together based on your embedding model:
+    #   bge-m3  (8192 token ctx)  → chunk_size=800, chunk_min_tokens=80
+    #   bge-small (512 token ctx) → chunk_size=400, chunk_min_tokens=40
+    chunk_size: int = 800          # target tokens per semantic chunk
+    chunk_overlap: int = 0         # legacy — semantic chunker uses sentence overlap instead
+    chunk_min_tokens: int = 80     # minimum tokens; smaller chunks discarded as noise
 
     # ─── Rate Limiting ────────────────────────────────────────────────────────
     rate_limit_per_minute: int = 20
