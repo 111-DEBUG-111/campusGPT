@@ -17,14 +17,24 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      # ─── Neon PostgreSQL ──────────────────────────────────────────────────────
+      # Format: postgresql+asyncpg://user:pass@host/db?ssl=true
+      - key: DATABASE_URL
+        sync: false
+      # ─── Supabase Storage (S3-compatible) ───────────────────────────────────
+      - key: STORAGE_ENDPOINT_URL
+        sync: false
+      - key: STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_SECRET_ACCESS_KEY
+        sync: false
+      - key: STORAGE_BUCKET_NAME
+        value: campusgpt-uploads
+      # ─── Static config ────────────────────────────────────────────────────────
       - key: EMBEDDING_MODEL
         value: BAAI/bge-small-en-v1.5
       - key: RERANKER_MODEL
         value: BAAI/bge-reranker-base
-      - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./data/campusgpt.db
-      - key: UPLOAD_DIR
-        value: ./data/uploads
       - key: RATE_LIMIT_PER_MINUTE
         value: "20"
       - key: DEBUG

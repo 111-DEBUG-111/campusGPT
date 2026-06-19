@@ -66,16 +66,15 @@ async def upload_document(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="File is empty")
 
-    # Reset file pointer for saving
+    # Reset file pointer for uploading to R2
     await file.seek(0)
 
-    # Save to disk
-    upload_dir = Path(settings.upload_dir)
-    file_path, file_size = await save_upload(file, upload_dir)
+    # Upload to Cloudflare R2
+    r2_key, file_size = await save_upload(file)
 
-    # Create DB record
+    # Create DB record  (filename stores the R2 object key)
     doc = Document(
-        filename=file_path.name,
+        filename=r2_key,
         original_filename=file.filename,
         category=category,
         description=description or None,
@@ -86,7 +85,7 @@ async def upload_document(
     await db.commit()
     await db.refresh(doc)
 
-    logger.info(f"Document uploaded: {file.filename} → id={doc.id}, queued for indexing")
+    logger.info(f"Document uploaded: {file.filename} → R2 key={r2_key}, id={doc.id}, queued for indexing")
 
     async def _index_in_background():
         """Creates its own DB session — safe to run after the request session closes."""
@@ -94,8 +93,8 @@ async def upload_document(
             try:
                 await process_document(
                     document_id=doc.id,
-                    file_path=file_path,
-                    filename=file_path.name,
+                    r2_key=r2_key,
+                    filename=file.filename,
                     category=category,
                     db=bg_db,
                 )

@@ -45,11 +45,21 @@ class Settings(BaseSettings):
     bm25_top_k: int = 20
     vector_top_k: int = 20
 
-    # ─── Database ─────────────────────────────────────────────────────────────
-    database_url: str = "sqlite+aiosqlite:///./data/campusgpt.db"
+    # ─── Database (Neon PostgreSQL) ───────────────────────────────────────────
+    # Format: postgresql+asyncpg://user:password@host/dbname?ssl=require
+    database_url: str
+
+    # ─── S3-Compatible Object Storage (Supabase Storage) ──────────────────────
+    # Supabase: Dashboard → Storage → S3 Connection → copy credentials
+    # Endpoint: https://<project-ref>.supabase.co/storage/v1/s3
+    storage_endpoint_url: str
+    storage_access_key_id: str
+    storage_secret_access_key: str
+    storage_bucket_name: str = "campusgpt-uploads"
+    # Optional: public CDN base URL if the bucket has public access enabled
+    storage_public_url: str | None = None
 
     # ─── Upload ───────────────────────────────────────────────────────────────
-    upload_dir: str = "./data/uploads"
     max_upload_size_mb: int = 50
 
     # ─── Chunking ─────────────────────────────────────────────────────────────

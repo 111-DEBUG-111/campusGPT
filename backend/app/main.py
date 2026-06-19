@@ -2,17 +2,14 @@
 CampusGPT FastAPI Application
 
 Startup sequence:
-  0. Download nltk punkt tokenizer data (if not cached)
-  1. Init SQLite DB (create tables)
-  2. Load embedding model (BGE-M3)
-  3. Connect to Qdrant (create collection + payload indexes)
+  1. Init Neon PostgreSQL DB (create tables if not exists)
+  2. Load embedding model (BGE-small)
+  3. Connect to Qdrant
   4. Rebuild BM25 index from Qdrant
   5. Load reranker
 """
 import logging
-import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import nltk
 from fastapi import FastAPI, Request
@@ -54,24 +51,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Starting {settings.app_name} v{settings.app_version}")
     logger.info("=" * 60)
 
-    # Ensure data directories exist
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    Path("./data").mkdir(exist_ok=True)
-
-    # 0. Download nltk punkt tokenizer data (one-time, ~1MB, cached after first run)
-    logger.info("Ensuring nltk punkt tokenizer data...")
-    for resource in ("punkt_tab", "punkt"):
-        try:
-            nltk.data.find(f"tokenizers/{resource}")
-            break
-        except LookupError:
-            try:
-                nltk.download(resource, quiet=True)
-                break
-            except Exception as e:
-                logger.warning(f"nltk download '{resource}' failed: {e}")
-
-    # 1. Init DB
+    # 1. Init DB (create tables in Neon PostgreSQL)
     logger.info("Initializing database...")
     await init_db()
 
