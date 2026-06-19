@@ -1,6 +1,6 @@
 """
 CampusGPT SQLAlchemy Database Setup
-Uses aiosqlite for async SQLite support.
+Uses asyncpg for async PostgreSQL (Neon) support.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -11,7 +11,14 @@ settings = get_settings()
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    connect_args={"check_same_thread": False},
+    # pool_pre_ping detects dropped connections (Neon idles out after 5 min)
+    pool_pre_ping=True,
+    # Neon free tier allows ~10 concurrent connections
+    pool_size=5,
+    max_overflow=10,
+    # asyncpg requires ssl via connect_args, NOT as a URL query param.
+    # Strip ?sslmode=... / ?ssl=... / ?channel_binding=... from DATABASE_URL.
+    connect_args={"ssl": "require"},
 )
 
 AsyncSessionLocal = async_sessionmaker(

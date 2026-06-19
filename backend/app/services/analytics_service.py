@@ -4,7 +4,7 @@ Analytics Service — Query logging and aggregation.
 import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, cast, Date
 
 from app.models import AnalyticsEvent, Message, Feedback, Document, Conversation
 from app.schemas import AnalyticsSummary
@@ -90,26 +90,26 @@ async def get_analytics_summary(db: AsyncSession) -> AnalyticsSummary:
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     qbd_result = await db.execute(
         select(
-            func.date(AnalyticsEvent.created_at).label("date"),
+            cast(AnalyticsEvent.created_at, Date).label("date"),
             func.count().label("count")
         )
         .where(AnalyticsEvent.event_type == "query")
         .where(AnalyticsEvent.created_at >= thirty_days_ago)
-        .group_by(func.date(AnalyticsEvent.created_at))
-        .order_by(func.date(AnalyticsEvent.created_at))
+        .group_by(cast(AnalyticsEvent.created_at, Date))
+        .order_by(cast(AnalyticsEvent.created_at, Date))
     )
     questions_by_day = [{"date": str(r[0]), "count": r[1]} for r in qbd_result.fetchall()]
 
     # Feedback by day
     fbd_result = await db.execute(
         select(
-            func.date(Feedback.created_at).label("date"),
+            cast(Feedback.created_at, Date).label("date"),
             Feedback.rating,
             func.count().label("count")
         )
         .where(Feedback.created_at >= thirty_days_ago)
-        .group_by(func.date(Feedback.created_at), Feedback.rating)
-        .order_by(func.date(Feedback.created_at))
+        .group_by(cast(Feedback.created_at, Date), Feedback.rating)
+        .order_by(cast(Feedback.created_at, Date))
     )
     feedback_by_day = [
         {"date": str(r[0]), "rating": r[1], "count": r[2]}

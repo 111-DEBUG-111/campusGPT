@@ -2,16 +2,14 @@
 CampusGPT FastAPI Application
 
 Startup sequence:
-  1. Init SQLite DB (create tables)
+  1. Init Neon PostgreSQL DB (create tables if not exists)
   2. Load embedding model (BGE-small)
   3. Connect to Qdrant
   4. Rebuild BM25 index from Qdrant
   5. Load reranker
 """
 import logging
-import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,11 +50,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Starting {settings.app_name} v{settings.app_version}")
     logger.info("=" * 60)
 
-    # Ensure data directories exist
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    Path("./data").mkdir(exist_ok=True)
-
-    # 1. Init DB
+    # 1. Init DB (create tables in Neon PostgreSQL)
     logger.info("Initializing database...")
     await init_db()
 

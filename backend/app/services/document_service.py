@@ -1,9 +1,10 @@
 """
 Document Service — Orchestrates upload → parse → embed → index → store.
+Files are persisted in Cloudflare R2 (S3-compatible object storage).
 """
 import logging
 import re
-import shutil
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
 from app.models import Document
+from app.r2_storage import upload_file as r2_upload, download_file as r2_download, delete_file as r2_delete
 from app.rag.ingestion import ingest_pdf, ingest_text_file
 from app.rag.embedder import get_embedder
 from app.rag.vectorstore import get_vectorstore
@@ -30,7 +32,7 @@ def _safe_filename(original: str) -> str:
     Security measures applied:
       1. Strip all directory components (prevents path traversal like ../../etc/passwd).
       2. Remove any character that isn't alphanumeric, a dot, hyphen, or underscore.
-      3. Prepend a UUID4 so the stored path is unguessable and collision-free.
+      3. Prepend a UUID4 so the stored key is unguessable and collision-free.
     """
     # 1. Strip directory components — only keep the bare filename
     name = Path(original).name
@@ -41,42 +43,40 @@ def _safe_filename(original: str) -> str:
     # 4. Fallback for degenerate inputs
     if not name:
         name = "upload"
-    # 5. Prepend UUID — stored filename is never just the user's string
+    # 5. Prepend UUID — stored key is never just the user's string
     return f"{uuid.uuid4().hex}_{name}"
 
 
-async def save_upload(file: UploadFile, upload_dir: Path) -> tuple[Path, int]:
-    """Save an uploaded file to disk with a sanitised UUID-based name.
+async def save_upload(file: UploadFile) -> tuple[str, int]:
+    """Upload a file to Cloudflare R2.
 
-    Returns (stored_path, size_bytes).  The caller must persist
+    Returns (r2_object_key, size_bytes).  The caller must persist
     ``file.filename`` (the *original* name) separately for display purposes.
+    The returned key is stored as ``Document.filename`` and used for all
+    subsequent R2 operations (download, delete).
     """
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
     safe_name = _safe_filename(file.filename or "upload")
-    dest = upload_dir / safe_name
-    # UUID prefix makes collisions astronomically unlikely, but guard anyway
-    while dest.exists():
-        safe_name = _safe_filename(file.filename or "upload")
-        dest = upload_dir / safe_name
+    r2_key = f"uploads/{safe_name}"
 
     content = await file.read()
-    dest.write_bytes(content)
+    await r2_upload(content, r2_key)
+
     logger.info(
-        f"Saved upload '{file.filename}' → '{dest.name}' ({len(content)} bytes)"
+        f"R2 upload: '{file.filename}' → key='{r2_key}' ({len(content)} bytes)"
     )
-    return dest, len(content)
+    return r2_key, len(content)
 
 
 async def process_document(
     document_id: int,
-    file_path: Path,
+    r2_key: str,
     filename: str,
     category: str,
     db: AsyncSession,
 ) -> int:
     """
-    Background processing: ingest → embed → upsert into Qdrant → update BM25.
+    Background processing: download from R2 → ingest → embed → upsert into Qdrant → update BM25.
+    Uses a temporary local file for the ingestion step (ingestion libs need a real Path).
     Returns number of chunks indexed.
     """
     # Update status to "indexing"
@@ -88,18 +88,30 @@ async def process_document(
     await db.commit()
 
     try:
-        # ── Ingest ──────────────────────────────────────────────────────────────
-        suffix = file_path.suffix.lower()
-        if suffix == ".pdf":
-            chunks = await run_in_threadpool(
-                ingest_pdf, file_path, document_id, filename, category
-            )
-        elif suffix in (".txt", ".md"):
-            chunks = await run_in_threadpool(
-                ingest_text_file, file_path, document_id, filename, category
-            )
-        else:
-            raise ValueError(f"Unsupported file type: {suffix}")
+        # ── Download from R2 ────────────────────────────────────────────────────
+        file_bytes = await r2_download(r2_key)
+
+        # ── Write to a temp file (ingestion libs require a Path) ───────────────
+        suffix = Path(filename).suffix.lower()
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = Path(tmp.name)
+
+        try:
+            # ── Ingest ──────────────────────────────────────────────────────────
+            if suffix == ".pdf":
+                chunks = await run_in_threadpool(
+                    ingest_pdf, tmp_path, document_id, filename, category
+                )
+            elif suffix in (".txt", ".md"):
+                chunks = await run_in_threadpool(
+                    ingest_text_file, tmp_path, document_id, filename, category
+                )
+            else:
+                raise ValueError(f"Unsupported file type: {suffix}")
+        finally:
+            # Always clean up the temp file
+            tmp_path.unlink(missing_ok=True)
 
         if not chunks:
             raise ValueError("No content extracted from document")
@@ -147,7 +159,7 @@ async def process_document(
 
 
 async def delete_document(document_id: int, db: AsyncSession) -> None:
-    """Remove document from DB, Qdrant, and BM25 index."""
+    """Remove document from DB, Qdrant, BM25 index, and Cloudflare R2."""
     # Get document info
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
@@ -162,16 +174,13 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
     bm25 = get_bm25_index()
     bm25.remove_by_document_id(document_id)
 
-    # Delete file from disk
-    upload_dir = Path(settings.upload_dir)
-    file_path = upload_dir / doc.filename
-    if file_path.exists():
-        file_path.unlink()
+    # Delete file from R2 (doc.filename stores the R2 object key)
+    await r2_delete(doc.filename)
 
     # Delete from DB
     await db.delete(doc)
     await db.commit()
-    logger.info(f"Document {document_id} ({doc.filename}) deleted")
+    logger.info(f"Document {document_id} (key={doc.filename}) deleted")
 
 
 async def rebuild_bm25_from_qdrant() -> int:
