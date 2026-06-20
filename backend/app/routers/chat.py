@@ -4,6 +4,7 @@ All conversation endpoints are scoped to the caller's session token.
 """
 import json
 import logging
+import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -20,6 +21,8 @@ from app.schemas import (
 )
 from app.rag.pipeline import run_rag_pipeline
 from app.services.analytics_service import log_event
+from app.cache.response_cache import get_cached_response, set_cached_response, is_cacheable
+from app.cache.kb_version import get_kb_version
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -104,14 +107,70 @@ async def chat(
     db.add(user_message)
     await db.flush()
 
-    # ── Run RAG pipeline ──────────────────────────────────────────────────────
+    # ── Run RAG pipeline (or serve from cache) ──────────────────────────────
+    # Snapshot the KB version before the cache lookup so both the GET and
+    # the log_event() call see a consistent version for this request.
+    kb_version = await run_in_threadpool(get_kb_version)
+    cache_start = time.monotonic()
+    cached = await run_in_threadpool(get_cached_response, body.query)
+    cache_lookup_ms = (time.monotonic() - cache_start) * 1000
+
+    if cached is not None:
+        # ── Cache HIT ──────────────────────────────────────────────────────────────
+        logger.info(
+            "Cache HIT for query '%s...' (%.1f ms lookup)",
+            body.query[:40],
+            cache_lookup_ms,
+        )
+        sources = [SourceCitation(**s) for s in cached.get("sources", [])]
+
+        # Always insert a real Message row so feedback routes continue to work.
+        # The cached answer is stored verbatim; the message_id is returned to
+        # the client so they can submit feedback on this specific response.
+        sources_json = json.dumps([s.model_dump() for s in sources])
+        assistant_message = Message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=cached["answer"],
+            sources_json=sources_json,
+        )
+        db.add(assistant_message)
+        await db.commit()
+        await db.refresh(assistant_message)
+
+        # Analytics: record the hit even though the pipeline didn't run.
+        # response_time_ms reflects the actual user-perceived latency (fast).
+        await log_event(
+            db=db,
+            event_type="query",
+            query=body.query,
+            conversation_id=conversation.id,
+            response_time_ms=cache_lookup_ms,
+            retrieved_chunks=cached.get("retrieved_chunks", 0),
+            cache_hit=True,
+            kb_version=kb_version,
+        )
+
+        return ChatResponse(
+            conversation_id=conversation.id,
+            message_id=assistant_message.id,
+            answer=cached["answer"],
+            sources=sources,
+            query_time_ms=cache_lookup_ms,
+        )
+
+    # ── Cache MISS — run the full RAG pipeline ───────────────────────────────
     try:
         result = await run_in_threadpool(run_rag_pipeline, body.query, history)
     except Exception as e:
         logger.error(f"RAG pipeline error: {e}")
         raise HTTPException(status_code=500, detail="RAG pipeline failed. Please try again.")
 
-    # ── Store assistant message ───────────────────────────────────────────────
+    # ── Store result in cache (only if valid / not an error) ─────────────────
+    if is_cacheable(result):
+        await run_in_threadpool(set_cached_response, body.query, result)
+
+    # ── Store assistant message ────────────────────────────────────────────
     sources_json = json.dumps([s.model_dump() for s in result["sources"]])
     assistant_message = Message(
         conversation_id=conversation.id,
@@ -123,7 +182,7 @@ async def chat(
     await db.commit()
     await db.refresh(assistant_message)
 
-    # ── Log analytics event ───────────────────────────────────────────────────
+    # ── Log analytics event ────────────────────────────────────────────────
     await log_event(
         db=db,
         event_type="query",
@@ -131,6 +190,8 @@ async def chat(
         conversation_id=conversation.id,
         response_time_ms=result["query_time_ms"],
         retrieved_chunks=result["retrieved_chunks"],
+        cache_hit=False,
+        kb_version=kb_version,
     )
 
     return ChatResponse(

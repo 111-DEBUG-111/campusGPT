@@ -20,6 +20,7 @@ from app.rag.ingestion import ingest_pdf, ingest_text_file
 from app.rag.embedder import get_embedder
 from app.rag.vectorstore import get_vectorstore
 from app.rag.bm25_index import get_bm25_index
+from app.cache.kb_version import bump_kb_version
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -144,7 +145,10 @@ async def process_document(
         )
         await db.commit()
 
-        logger.info(f"Document {document_id} indexed: {len(chunks)} chunks")
+        # ── Invalidate response cache ──────────────────────────────────────────
+        # Any cached answers may now be stale (new document changes KB content).
+        new_version = await run_in_threadpool(bump_kb_version)
+        logger.info(f"Document {document_id} indexed: {len(chunks)} chunks (kb_version={new_version})")
         return len(chunks)
 
     except Exception as e:
@@ -180,7 +184,10 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
     # Delete from DB
     await db.delete(doc)
     await db.commit()
-    logger.info(f"Document {document_id} (key={doc.filename}) deleted")
+
+    # Invalidate response cache — deleted document may be cited in cached answers.
+    new_version = await run_in_threadpool(bump_kb_version)
+    logger.info(f"Document {document_id} (key={doc.filename}) deleted (kb_version={new_version})")
 
 
 async def rebuild_bm25_from_vectorstore() -> int:
@@ -190,5 +197,8 @@ async def rebuild_bm25_from_vectorstore() -> int:
 
     chunks = await run_in_threadpool(vectorstore.fetch_all_chunks)
     bm25.build_from_chunks(chunks)
-    logger.info(f"BM25 rebuilt from pgvector: {len(chunks)} chunks")
+
+    # Invalidate cache — reindexing may have changed KB content.
+    new_version = await run_in_threadpool(bump_kb_version)
+    logger.info(f"BM25 rebuilt from pgvector: {len(chunks)} chunks (kb_version={new_version})")
     return len(chunks)

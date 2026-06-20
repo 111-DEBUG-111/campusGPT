@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
 from app.database import get_db, AsyncSessionLocal
@@ -18,6 +19,7 @@ from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
 from app.services.document_service import (
     save_upload, process_document, delete_document, rebuild_bm25_from_vectorstore
 )
+from app.cache.response_cache import flush_response_cache
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -169,3 +171,31 @@ async def get_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+@router.post("/cache/flush", status_code=200)
+@limiter.limit("5/minute")    # nuclear option — strict cap
+async def flush_cache(
+    request: Request,          # required by slowapi for IP extraction
+    _: None = Depends(verify_admin_cookie),
+):
+    """
+    Flush all cached RAG responses from Upstash Redis.
+
+    Use this as an emergency override when you need to force all users to
+    receive fresh answers immediately (e.g., after a critical document update
+    that must propagate before the 24-hour TTL expires).
+
+    The KB version counter is NOT reset, so the regular version-based
+    invalidation continues to work correctly after the flush.
+
+    Returns the number of cache entries deleted.
+    """
+    deleted = await run_in_threadpool(flush_response_cache)
+    if deleted == -1:
+        raise HTTPException(
+            status_code=503,
+            detail="Cache flush failed — Redis unavailable. Check UPSTASH_REDIS_URL.",
+        )
+    logger.info(f"Admin cache flush: {deleted} entries deleted")
+    return {"deleted_keys": deleted, "message": f"Flushed {deleted} cached response(s)."}

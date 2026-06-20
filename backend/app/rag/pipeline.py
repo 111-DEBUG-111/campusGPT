@@ -162,7 +162,9 @@ def run_rag_pipeline(
         answer = response.text.strip()
     except Exception as e:
         logger.error(f"Gemini generation failed: {e}")
-        answer = "I'm having trouble generating a response right now. Please try again in a moment."
+        # Re-raise so the caller (chat.py) handles it via HTTPException.
+        # This guarantees a failed generation is NEVER cached.
+        raise
 
     # ── Step 5: Citations ──────────────────────────────────────────────────────
     citations = chunks_to_citations(chunks)
@@ -175,4 +177,7 @@ def run_rag_pipeline(
         "sources": citations,
         "retrieved_chunks": len(chunks),
         "query_time_ms": elapsed_ms,
+        # is_error=False signals to the cache layer that this result is safe
+        # to store.  The cache checks this flag before every SET operation.
+        "is_error": False,
     }

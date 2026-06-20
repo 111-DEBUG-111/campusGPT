@@ -52,12 +52,18 @@ async def log_event(
     conversation_id: int | None = None,
     response_time_ms: float | None = None,
     retrieved_chunks: int | None = None,
+    cache_hit: bool | None = None,
+    kb_version: int | None = None,
 ) -> None:
     """Log an analytics event.
 
     The ``query`` string is sanitised before storage: HTML tags are stripped
     and the value is truncated to ``_QUERY_MAX_LENGTH`` characters so that
     no raw markup can be persisted and later reflected in the dashboard.
+
+    ``cache_hit`` records whether the response was served from cache.
+    ``kb_version`` records the knowledge base version at request time.
+    Both are nullable for backward compatibility with existing rows.
     """
     sanitized_query = _sanitize_query(query) if query is not None else None
     event = AnalyticsEvent(
@@ -66,9 +72,12 @@ async def log_event(
         conversation_id=conversation_id,
         response_time_ms=response_time_ms,
         retrieved_chunks=retrieved_chunks,
+        cache_hit=cache_hit,
+        kb_version=kb_version,
     )
     db.add(event)
     await db.commit()
+
 
 
 async def get_analytics_summary(db: AsyncSession) -> AnalyticsSummary:

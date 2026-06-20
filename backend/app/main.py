@@ -28,6 +28,7 @@ from app.rag.bm25_index import get_bm25_index
 from app.rag.reranker import get_reranker
 from app.rag.pipeline import get_gemini_model
 from app.services.document_service import rebuild_bm25_from_vectorstore
+from app.cache.client import ping_redis
 
 # Import all routers
 from app.routers import chat, documents, feedback, analytics, health, admin_auth
@@ -76,6 +77,17 @@ async def lifespan(app: FastAPI):
     # 6. Initialise Gemini client
     logger.info("Initialising Gemini client...")
     get_gemini_model()
+
+    # 7. Test Redis / cache connectivity
+    logger.info("Testing Upstash Redis connectivity...")
+    redis_ok = await ping_redis()
+    if redis_ok:
+        logger.info("✅ Upstash Redis connected — response caching active")
+    else:
+        logger.warning(
+            "⚠️  Upstash Redis unavailable — response caching DISABLED. "
+            "Set UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN to enable."
+        )
 
     logger.info("✅ CampusGPT ready to serve requests")
     yield
