@@ -152,15 +152,29 @@ export const useChatStore = create<ChatState>()(
       // ── Chat switching with instant cache render ────────────────────────────
       setActiveConversation: async (id) => {
         if (id === null) {
-          set({ activeConversationId: null, activeConversation: null });
+          set({
+            activeConversationId: null,
+            activeConversation: null,
+            // Clear any in-flight state from a previous conversation
+            pendingUserMessage: null,
+            isLoading: false,
+            error: null,
+          });
           return;
         }
 
         const cached = getCached(id);
 
         if (cached) {
-          // ⚡ Instant render from cache
-          set({ activeConversationId: id, activeConversation: cached, isLoading: false });
+          // ⚡ Instant render from cache — clear any in-flight state from
+          // whatever conversation was previously active so it never bleeds in.
+          set({
+            activeConversationId: id,
+            activeConversation: cached,
+            isLoading: false,
+            pendingUserMessage: null,
+            error: null,
+          });
 
           // Background refresh only if the TTL has expired
           if (isCacheStale(id)) {
@@ -174,10 +188,20 @@ export const useChatStore = create<ChatState>()(
               });
           }
         } else {
-          // Cold-start cache miss — show loading state
-          set({ activeConversationId: id, activeConversation: null, isLoading: true });
+          // Cold-start cache miss — show loading state, but still clear any
+          // pending message/error that belonged to the previous conversation.
+          set({
+            activeConversationId: id,
+            activeConversation: null,
+            isLoading: true,
+            pendingUserMessage: null,
+            error: null,
+          });
           await get().loadConversation(id);
-          set({ isLoading: false });
+          // Guard: only clear the spinner if we're still on this conversation
+          if (get().activeConversationId === id) {
+            set({ isLoading: false });
+          }
         }
       },
 
@@ -242,6 +266,9 @@ export const useChatStore = create<ChatState>()(
       sendMessage: async (query) => {
         const { activeConversationId, activeConversation } = get();
         const isNewConversation = !activeConversationId;
+        // Snapshot the originating conversation ID so we can guard against
+        // the user switching to a different chat before the response arrives.
+        const originatingConvId = activeConversationId;
 
         const optimisticTitle =
           query.length > 55 ? query.slice(0, 55) + '…' : query;
@@ -277,14 +304,31 @@ export const useChatStore = create<ChatState>()(
           // Reload full conversation
           const conversation = await chatApi.getConversation(response.conversation_id);
 
-          // ── Update cache in-place (user decision) ──────────────────────────
+          // ── Update cache so the result is available for instant render ──────
           setCached(response.conversation_id, conversation);
 
-          set({
-            activeConversation: conversation,
-            activeConversationId: response.conversation_id,
-            pendingUserMessage: null,
-          });
+          // Only surface the result into the UI if the user hasn't switched to
+          // a different conversation while we were waiting for the response.
+          // If they switched away, the completed message is safely in the LRU
+          // cache and will appear when they navigate back.
+          const stillOnOriginalConv =
+            get().activeConversationId === originatingConvId ||
+            get().activeConversationId === response.conversation_id ||
+            // Also update if it was a new conversation (tempId path) —
+            // in that case the response gives us the real ID for the first time.
+            isNewConversation;
+
+          if (stillOnOriginalConv) {
+            set({
+              activeConversation: conversation,
+              activeConversationId: response.conversation_id,
+              pendingUserMessage: null,
+            });
+          } else {
+            // User has navigated away — just clean up the pending state that
+            // belongs to *this* request without touching the current view.
+            // pendingUserMessage was already cleared by setActiveConversation.
+          }
 
           // Force-refresh the sidebar list so the new/updated entry appears
           await get().loadConversations(true);
@@ -331,7 +375,13 @@ export const useChatStore = create<ChatState>()(
 
           setTimeout(() => get().dismissToast(), 6000);
         } finally {
-          set({ isLoading: false });
+          // Only clear the spinner for the conversation this request belongs to.
+          // If the user has already switched away, leave the current view's
+          // isLoading state untouched (it may be a cold-start fetch for the new chat).
+          const currentId = get().activeConversationId;
+          if (currentId === originatingConvId || isNewConversation) {
+            set({ isLoading: false });
+          }
         }
       },
 
