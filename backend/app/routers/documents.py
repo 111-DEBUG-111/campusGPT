@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_db, AsyncSessionLocal
+from app.dependencies import verify_admin_cookie
 from app.limiter import limiter
 from app.models import Document
 from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
@@ -26,11 +27,6 @@ ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 MAX_SIZE_BYTES = settings.max_upload_size_mb * 1024 * 1024
 
 
-def verify_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
-    """Dependency: validates the X-Admin-Key header."""
-    if x_admin_key != settings.admin_api_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing admin API key")
-
 
 @router.post("/upload", response_model=DocumentOut)
 @limiter.limit("10/minute")   # admin uploads: conservative limit to protect the embedding queue
@@ -41,7 +37,7 @@ async def upload_document(
     category: str = Form(default="general"),
     description: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """
     Upload a PDF/TXT/MD document and trigger background indexing.
@@ -110,7 +106,7 @@ async def upload_document(
 async def list_documents(
     request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """List all uploaded documents with their indexing status."""
     result = await db.execute(
@@ -126,7 +122,7 @@ async def delete_doc(
     request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """Delete a document from pgvector, BM25, R2 storage, and DB."""
     result = await db.execute(select(Document).where(Document.id == document_id))
@@ -142,7 +138,7 @@ async def delete_doc(
 async def reindex_all(
     request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """
     Rebuild BM25 index from pgvector (useful after manual data changes).
@@ -165,7 +161,7 @@ async def get_document(
     request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """Get details for a single document."""
     result = await db.execute(select(Document).where(Document.id == document_id))

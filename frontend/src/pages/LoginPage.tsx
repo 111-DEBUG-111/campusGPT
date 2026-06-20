@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GraduationCap, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { adminApi } from '../api/admin';
 
 const LoginPage: React.FC = () => {
   const [key, setKey] = useState('');
@@ -17,26 +18,17 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      // Verify key by calling analytics endpoint
-      const res = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/admin/analytics`,
-        { headers: { 'x-admin-key': key } }
-      );
-
-      if (res.ok) {
-        sessionStorage.setItem('campusgpt_admin_key', key);
-        // Update env for the session
-        (window as any).__ADMIN_KEY__ = key;
-        navigate('/admin');
-      } else {
-        setError('Invalid admin key. Please check and try again.');
-      }
+      // Send the key once to the backend; the server verifies it and sets an
+      // HttpOnly session cookie. The key is never stored in JS after this call.
+      await adminApi.login(key);
+      navigate('/admin');
     } catch {
-      setError('Could not connect to the backend. Is it running?');
+      setError('Invalid admin key. Please check and try again.');
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <div

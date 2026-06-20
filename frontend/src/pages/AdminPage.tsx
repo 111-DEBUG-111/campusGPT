@@ -23,15 +23,19 @@ const AdminPage: React.FC = () => {
     clearMessages,
   } = useAdminStore();
 
-  // Inject admin key from session storage into API client
+  // Guard: attempt to load data; if cookie is missing/expired the backend
+  // returns 401 and loadDocuments/loadAnalytics will surface the error.
+  // We catch that here and redirect to login.
   useEffect(() => {
-    const storedKey = sessionStorage.getItem('campusgpt_admin_key');
-    if (!storedKey && !import.meta.env.VITE_ADMIN_KEY) {
-      navigate('/admin/login');
-      return;
-    }
-    loadDocuments();
-    loadAnalytics();
+    (async () => {
+      try {
+        await Promise.all([loadDocuments(), loadAnalytics()]);
+      } catch (err: any) {
+        if (err?.message?.includes('401') || err?.message?.toLowerCase().includes('session')) {
+          navigate('/admin/login');
+        }
+      }
+    })();
   }, []);
 
   // Auto-dismiss messages

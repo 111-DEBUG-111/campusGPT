@@ -28,7 +28,7 @@ from app.rag.reranker import get_reranker
 from app.services.document_service import rebuild_bm25_from_vectorstore
 
 # Import all routers
-from app.routers import chat, documents, feedback, analytics, health
+from app.routers import chat, documents, feedback, analytics, health, admin_auth
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -117,6 +117,7 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(health.router)
+    app.include_router(admin_auth.router)   # login / logout — must be first so cookie is set before admin routes
     app.include_router(chat.router)
     app.include_router(documents.router)
     app.include_router(feedback.router)
