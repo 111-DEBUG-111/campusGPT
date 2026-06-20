@@ -1,19 +1,70 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, MessageSquare, Trash2, LayoutDashboard, GraduationCap, Menu, X, AlertTriangle } from 'lucide-react';
+import {
+  Plus,
+  MessageSquare,
+  Trash2,
+  LayoutDashboard,
+  GraduationCap,
+  Menu,
+  X,
+  AlertTriangle,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Search,
+} from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
+import type { PendingConversationStatus } from '../../types';
 
 interface ConversationSidebarProps {
   onAdminClick: () => void;
 }
 
+// ── Status badge helpers ──────────────────────────────────────────────────────
+
+interface BadgeConfig {
+  label: string;
+  icon: React.ReactNode;
+  className: string;
+}
+
+function getStatusBadge(status: PendingConversationStatus): BadgeConfig {
+  switch (status) {
+    case 'retrieving':
+      return {
+        label: 'Retrieving…',
+        icon: <Search size={9} />,
+        className: 'pending-badge pending-badge-retrieving',
+      };
+    case 'generating':
+      return {
+        label: 'Generating…',
+        icon: <Loader2 size={9} className="animate-spin" />,
+        className: 'pending-badge pending-badge-generating',
+      };
+    case 'failed':
+      return {
+        label: 'Failed',
+        icon: <XCircle size={9} />,
+        className: 'pending-badge pending-badge-failed',
+      };
+  }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdminClick }) => {
   const {
     conversations,
     activeConversationId,
+    pendingConversations,
+    completionToast,
     loadConversations,
     setActiveConversation,
     startNewChat,
     deleteConversation,
+    dismissToast,
+    _removePending,
   } = useChatStore();
 
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -25,7 +76,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
   }, []);
 
   const handleConvClick = async (id: number) => {
-    if (confirmDeleteId !== null) return; // don't navigate while confirm is open
+    if (confirmDeleteId !== null) return;
     await setActiveConversation(id);
     setMobileOpen(false);
   };
@@ -51,6 +102,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
     e?.stopPropagation();
     setConfirmDeleteId(null);
   };
+
+  const hasPending = pendingConversations.length > 0;
 
   return (
     <>
@@ -97,8 +150,57 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
 
         {/* Conversation list */}
         <div className="sidebar-nav">
+
+          {/* ── Active / Pending chats ─── */}
+          {hasPending && (
+            <>
+              <p className="sidebar-section-label">Active</p>
+              {pendingConversations.map((pending) => {
+                const badge = getStatusBadge(pending.status);
+                return (
+                  <div
+                    key={pending.tempId}
+                    className={`conv-item conv-item-pending ${pending.status === 'failed' ? 'conv-item-failed' : ''}`}
+                    aria-label={`Processing: ${pending.title}`}
+                    title={pending.error || undefined}
+                  >
+                    {/* Animated left accent */}
+                    {pending.status !== 'failed' && (
+                      <span className="pending-pulse-dot" />
+                    )}
+                    {pending.status === 'failed' && (
+                      <XCircle size={14} style={{ color: '#ef4444', flexShrink: 0 }} />
+                    )}
+                    <span className="conv-item-title" style={{ color: pending.status === 'failed' ? '#fca5a5' : '#e2e8f0' }}>
+                      {pending.title}
+                    </span>
+                    <span className={badge.className}>
+                      {badge.icon}
+                      {badge.label}
+                    </span>
+                    {pending.status === 'failed' && (
+                      <button
+                        className="conv-delete-btn"
+                        style={{ opacity: 1 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          _removePending(pending.tempId);
+                        }}
+                        aria-label="Dismiss failed chat"
+                        type="button"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {/* ── Past conversations ─── */}
           {conversations.length > 0 && (
-            <p className="sidebar-section-label">Recent Chats</p>
+            <p className="sidebar-section-label">{hasPending ? 'Recent Chats' : 'Recent Chats'}</p>
           )}
           {conversations.map((conv) => (
             <div key={conv.id}>
@@ -151,7 +253,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
               )}
             </div>
           ))}
-          {conversations.length === 0 && (
+
+          {conversations.length === 0 && !hasPending && (
             <p style={{ color: '#475569', fontSize: '12px', textAlign: 'center', padding: '16px' }}>
               No conversations yet.<br />Start one above!
             </p>
@@ -170,6 +273,40 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
           </button>
         </div>
       </div>
+
+      {/* ── Completion Toast ─────────────────────────────────────────────── */}
+      {completionToast && (
+        <div
+          className={`completion-toast ${completionToast.success ? 'completion-toast-success' : 'completion-toast-error'}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="completion-toast-icon">
+            {completionToast.success
+              ? <CheckCircle2 size={16} />
+              : <XCircle size={16} />
+            }
+          </div>
+          <div className="completion-toast-body">
+            <p className="completion-toast-label">
+              {completionToast.success ? 'Response ready' : 'Request failed'}
+            </p>
+            <p className="completion-toast-title">{completionToast.title}</p>
+            {completionToast.errorDetail && (
+              <p style={{ fontSize: '11px', color: '#fca5a5', marginTop: '2px', lineHeight: '1.3' }}>
+                {completionToast.errorDetail}
+              </p>
+            )}
+          </div>
+          <button
+            className="completion-toast-close"
+            onClick={dismissToast}
+            aria-label="Dismiss notification"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
     </>
   );
 };

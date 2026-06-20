@@ -4,7 +4,7 @@ Full RAG Pipeline Orchestrator for CampusGPT.
 Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → Gemini Response
 """
 import logging
-import json
+import re
 import time
 import google.generativeai as genai
 from app.config import get_settings
@@ -14,6 +14,83 @@ from app.schemas import SourceCitation
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+# ─── Structured pipeline error ─────────────────────────────────────────────────
+
+class RagPipelineError(Exception):
+    """
+    Raised by run_rag_pipeline when a classified, user-safe error occurs.
+    Carries a clean ``user_message`` and an HTTP ``status_code`` so the
+    router can return a well-formed error response without leaking internals.
+    """
+    def __init__(self, user_message: str, status_code: int = 500):
+        super().__init__(user_message)
+        self.user_message = user_message
+        self.status_code = status_code
+
+
+# ─── Gemini error classifier ───────────────────────────────────────────────────
+
+def _classify_gemini_error(exc: Exception) -> RagPipelineError:
+    """
+    Inspect a raw Gemini / google-api exception and return a
+    :class:`RagPipelineError` with a friendly, actionable message.
+    """
+    raw = str(exc)
+
+    # ── Quota / rate-limit (HTTP 429) ─────────────────────────────────────────
+    if "429" in raw or "quota" in raw.lower() or "rate" in raw.lower():
+        # Try to pull out the retry_delay so users know how long to wait
+        match = re.search(r"retry.*?in\s+(\d+)(\.\d+)?s", raw, re.IGNORECASE)
+        if match:
+            wait = int(match.group(1)) + 1          # round up
+            if wait >= 60:
+                wait_str = f"{wait // 60} min {wait % 60}s" if wait % 60 else f"{wait // 60} min"
+            else:
+                wait_str = f"{wait}s"
+            return RagPipelineError(
+                f"Gemini AI rate limit reached — please try again in {wait_str}.",
+                status_code=429,
+            )
+        # Daily quota exhausted (no retry-after)
+        if "GenerateRequestsPerDay" in raw or "per_day" in raw.lower() or "per day" in raw.lower():
+            return RagPipelineError(
+                "Gemini AI daily quota exhausted. The free tier limit has been reached for today — "
+                "please try again tomorrow or contact the admin.",
+                status_code=429,
+            )
+        return RagPipelineError(
+            "Gemini AI is temporarily rate-limited. Please wait a moment and try again.",
+            status_code=429,
+        )
+
+    # ── Authentication / API key ───────────────────────────────────────────────
+    if "401" in raw or "403" in raw or "API_KEY" in raw.upper() or "api key" in raw.lower():
+        return RagPipelineError(
+            "Gemini AI authentication failed — the API key may be invalid or missing.",
+            status_code=503,
+        )
+
+    # ── Service unavailable / server-side error ────────────────────────────────
+    if "503" in raw or "502" in raw or "unavailable" in raw.lower():
+        return RagPipelineError(
+            "Gemini AI is currently unavailable. Please try again in a few moments.",
+            status_code=503,
+        )
+
+    # ── Safety / content blocked ───────────────────────────────────────────────
+    if "safety" in raw.lower() or "blocked" in raw.lower() or "HARM" in raw:
+        return RagPipelineError(
+            "Your question was blocked by the AI safety filter. Please rephrase and try again.",
+            status_code=422,
+        )
+
+    # ── Generic fallback ──────────────────────────────────────────────────────
+    return RagPipelineError(
+        "The AI model encountered an error while generating a response. Please try again.",
+        status_code=500,
+    )
 
 # ─── Gemini model singleton ────────────────────────────────────────────────────
 _gemini_model: genai.GenerativeModel | None = None
@@ -162,9 +239,10 @@ def run_rag_pipeline(
         answer = response.text.strip()
     except Exception as e:
         logger.error(f"Gemini generation failed: {e}")
-        # Re-raise so the caller (chat.py) handles it via HTTPException.
-        # This guarantees a failed generation is NEVER cached.
-        raise
+        # Convert to a structured error with a clean user message and HTTP
+        # status code.  The router catches RagPipelineError specifically and
+        # returns the right HTTP status + detail — no internal details leaked.
+        raise _classify_gemini_error(e) from e
 
     # ── Step 5: Citations ──────────────────────────────────────────────────────
     citations = chunks_to_citations(chunks)
