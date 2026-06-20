@@ -15,6 +15,19 @@ from app.schemas import SourceCitation
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# ─── Gemini model singleton ────────────────────────────────────────────────────
+_gemini_model: genai.GenerativeModel | None = None
+
+
+def get_gemini_model() -> genai.GenerativeModel:
+    """Return the singleton Gemini GenerativeModel, creating it on first call."""
+    global _gemini_model
+    if _gemini_model is None:
+        genai.configure(api_key=settings.gemini_api_key)
+        _gemini_model = genai.GenerativeModel(settings.gemini_model)
+        logger.info(f"Gemini model '{settings.gemini_model}' initialised.")
+    return _gemini_model
+
 
 SYSTEM_PROMPT = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
 
@@ -134,8 +147,7 @@ def run_rag_pipeline(
     history_text = format_history(history)
 
     # ── Step 4: Gemini Response ────────────────────────────────────────────────
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(settings.gemini_model)
+    model = get_gemini_model()
 
     prompt = SYSTEM_PROMPT.format(context=context, history=history_text)
 
