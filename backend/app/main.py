@@ -4,9 +4,10 @@ CampusGPT FastAPI Application
 Startup sequence:
   1. Init Neon PostgreSQL DB (create tables if not exists)
   2. Load embedding model (BGE-small)
-  3. Connect to Qdrant
-  4. Rebuild BM25 index from Qdrant
+  3. Connect to pgvector
+  4. Rebuild BM25 index from pgvector
   5. Load reranker
+  6. Initialise Gemini client
 """
 import logging
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from app.rag.embedder import get_embedder
 from app.rag.vectorstore import get_vectorstore
 from app.rag.bm25_index import get_bm25_index
 from app.rag.reranker import get_reranker
+from app.rag.pipeline import get_gemini_model
 from app.services.document_service import rebuild_bm25_from_vectorstore
 
 # Import all routers
@@ -70,6 +72,10 @@ async def lifespan(app: FastAPI):
     # 5. Load reranker
     logger.info("Loading reranker model...")
     get_reranker()
+
+    # 6. Initialise Gemini client
+    logger.info("Initialising Gemini client...")
+    get_gemini_model()
 
     logger.info("✅ CampusGPT ready to serve requests")
     yield
