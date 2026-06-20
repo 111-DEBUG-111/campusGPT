@@ -191,6 +191,12 @@ export const AnalyticsDashboard: React.FC<Props> = ({ analytics }) => {
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
+                    {/*
+                      * SECURITY: Render query text via JSX interpolation only.
+                      * Do NOT switch to dangerouslySetInnerHTML here — top_queries
+                      * data originates from user input and must never be rendered
+                      * as raw HTML regardless of any backend sanitization in place.
+                      */}
                     <span className="text-sm truncate" style={{ color: '#94a3b8' }}>
                       {q.query}
                     </span>

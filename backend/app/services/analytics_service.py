@@ -3,6 +3,7 @@ Analytics Service — Query logging and aggregation.
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
 
@@ -10,6 +11,38 @@ from app.models import AnalyticsEvent, Message, Feedback, Document, Conversation
 from app.schemas import AnalyticsSummary
 
 logger = logging.getLogger(__name__)
+
+# Maximum query length to store — matches ChatRequest.query max_length.
+_QUERY_MAX_LENGTH = 2000
+
+
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML-tag stripper using the stdlib parser (no deps)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:  # noqa: D102
+        self._parts.append(data)
+
+    def get_text(self) -> str:  # noqa: D102
+        return "".join(self._parts)
+
+
+def _sanitize_query(query: str) -> str:
+    """
+    Strip HTML tags and enforce the max-length cap before storage.
+
+    This closes the stored-XSS vector: even if an attacker submits
+    ``<script>alert(1)</script>`` as a chat query the value persisted
+    in AnalyticsEvent.query will be the plain-text equivalent
+    (``alert(1)`` in that example) rather than raw markup.
+    """
+    stripper = _HTMLStripper()
+    stripper.feed(query)
+    clean = stripper.get_text().strip()
+    return clean[:_QUERY_MAX_LENGTH]
 
 
 async def log_event(
@@ -20,10 +53,16 @@ async def log_event(
     response_time_ms: float | None = None,
     retrieved_chunks: int | None = None,
 ) -> None:
-    """Log an analytics event."""
+    """Log an analytics event.
+
+    The ``query`` string is sanitised before storage: HTML tags are stripped
+    and the value is truncated to ``_QUERY_MAX_LENGTH`` characters so that
+    no raw markup can be persisted and later reflected in the dashboard.
+    """
+    sanitized_query = _sanitize_query(query) if query is not None else None
     event = AnalyticsEvent(
         event_type=event_type,
-        query=query,
+        query=sanitized_query,
         conversation_id=conversation_id,
         response_time_ms=response_time_ms,
         retrieved_chunks=retrieved_chunks,
