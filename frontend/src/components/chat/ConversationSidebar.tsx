@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   MessageSquare,
@@ -61,6 +61,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
     completionToast,
     loadConversations,
     setActiveConversation,
+    prefetchConversation,
     startNewChat,
     deleteConversation,
     dismissToast,
@@ -71,6 +72,9 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Ref to hold the debounce timer for hover-prefetch
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     loadConversations();
   }, []);
@@ -79,6 +83,22 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
     if (confirmDeleteId !== null) return;
     await setActiveConversation(id);
     setMobileOpen(false);
+  };
+
+  /** Start a 150 ms debounced prefetch when the user hovers a conversation item. */
+  const handleConvHover = (id: number) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      prefetchConversation(id);
+    }, 150);
+  };
+
+  /** Cancel the debounce if the mouse leaves before 150 ms. */
+  const handleConvHoverOut = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
   };
 
   const handleDeleteClick = (e: React.MouseEvent, id: number) => {
@@ -233,6 +253,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
                 <div
                   className={`conv-item ${activeConversationId === conv.id ? 'active' : ''}`}
                   onClick={() => handleConvClick(conv.id)}
+                  onMouseEnter={() => handleConvHover(conv.id)}
+                  onMouseLeave={handleConvHoverOut}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => e.key === 'Enter' && handleConvClick(conv.id)}

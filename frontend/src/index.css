@@ -990,3 +990,75 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ─── Skeleton Loading (cold-start cache miss) ───────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px 0;
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.skeleton-row-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.skeleton-right {
+  flex-direction: row-reverse;
+}
+
+.skeleton-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, #1a1d25 25%, #252833 50%, #1a1d25 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+}
+
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  max-width: calc(100% - 44px);
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #1a1d25 25%, #252833 50%, #1a1d25 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+}
+
+.skeleton-right .skeleton-lines {
+  align-items: flex-end;
+}
+
+/* ─── Background-refresh pill (topbar) ───────────────────────────────────── */
+.bg-refresh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #6366f1;
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 20px;
+  padding: 2px 8px;
+  animation: fadeIn 0.2s ease-out;
+  letter-spacing: 0.02em;
+}
