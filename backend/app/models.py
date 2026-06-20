@@ -45,7 +45,7 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
     feedback: Mapped[list["Feedback"]] = relationship(
@@ -86,7 +86,7 @@ class Document(Base):
     category: Mapped[str] = mapped_column(String(100), default="general")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -99,7 +99,7 @@ class AnalyticsEvent(Base):
     __tablename__ = "analytics_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    event_type: Mapped[str] = mapped_column(String(50))
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
     query: Mapped[str | None] = mapped_column(Text, nullable=True)
     conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -107,7 +107,7 @@ class AnalyticsEvent(Base):
     # Cache tracking (added v1.3)
     cache_hit: Mapped[bool | None] = mapped_column(nullable=True)
     kb_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 # NOTE: document_chunks table is managed via raw DDL in database.py
 # (see _apply_migrations). It uses the pgvector `vector` column type which
