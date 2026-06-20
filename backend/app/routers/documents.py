@@ -11,11 +11,12 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_db, AsyncSessionLocal
+from app.dependencies import verify_admin_cookie
 from app.limiter import limiter
 from app.models import Document
 from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
 from app.services.document_service import (
-    save_upload, process_document, delete_document, rebuild_bm25_from_qdrant
+    save_upload, process_document, delete_document, rebuild_bm25_from_vectorstore
 )
 
 logger = logging.getLogger(__name__)
@@ -25,11 +26,6 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 MAX_SIZE_BYTES = settings.max_upload_size_mb * 1024 * 1024
 
-
-def verify_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
-    """Dependency: validates the X-Admin-Key header."""
-    if x_admin_key != settings.admin_api_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing admin API key")
 
 
 @router.post("/upload", response_model=DocumentOut)
@@ -41,7 +37,7 @@ async def upload_document(
     category: str = Form(default="general"),
     description: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """
     Upload a PDF/TXT/MD document and trigger background indexing.
@@ -110,7 +106,7 @@ async def upload_document(
 async def list_documents(
     request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """List all uploaded documents with their indexing status."""
     result = await db.execute(
@@ -126,9 +122,9 @@ async def delete_doc(
     request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
-    """Delete a document from disk, Qdrant, BM25, and DB."""
+    """Delete a document from pgvector, BM25, R2 storage, and DB."""
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if not doc:
@@ -142,13 +138,13 @@ async def delete_doc(
 async def reindex_all(
     request: Request,          # required by slowapi for IP extraction
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """
-    Rebuild BM25 index from Qdrant (useful after manual data changes).
+    Rebuild BM25 index from pgvector (useful after manual data changes).
     Does NOT re-embed documents — use delete + re-upload for that.
     """
-    chunk_count = await rebuild_bm25_from_qdrant()
+    chunk_count = await rebuild_bm25_from_vectorstore()
     result = await db.execute(
         select(Document).where(Document.status == "indexed")
     )
@@ -165,7 +161,7 @@ async def get_document(
     request: Request,          # required by slowapi for IP extraction
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_admin),
+    _: None = Depends(verify_admin_cookie),
 ):
     """Get details for a single document."""
     result = await db.execute(select(Document).where(Document.id == document_id))

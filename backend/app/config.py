@@ -36,10 +36,10 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-base"
     reranker_top_k: int = 5
 
-    # ─── Qdrant ───────────────────────────────────────────────────────────────
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_api_key: str | None = None
-    qdrant_collection: str = "campusgpt_docs"
+    # ─── pgvector ─────────────────────────────────────────────────────────────
+    # Hardcoded to 1024 for BAAI/bge-m3.  If you switch embedding models,
+    # the document_chunks.embedding column must be dropped and recreated.
+    vector_dimension: int = 1024
 
     # ─── BM25 ─────────────────────────────────────────────────────────────────
     bm25_top_k: int = 20

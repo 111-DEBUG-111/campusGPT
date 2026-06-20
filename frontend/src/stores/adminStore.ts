@@ -36,7 +36,10 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       const response = await adminApi.listDocuments();
       set({ documents: response.documents, totalDocuments: response.total });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to load documents' });
+      const msg = error instanceof Error ? error.message : 'Failed to load documents';
+      set({ error: msg, isLoading: false });
+      // Re-throw so callers (e.g. AdminPage) can redirect on 401
+      throw error;
     } finally {
       set({ isLoading: false });
     }
@@ -84,7 +87,10 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       const analytics = await adminApi.getAnalytics();
       set({ analytics });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to load analytics' });
+      const msg = error instanceof Error ? error.message : 'Failed to load analytics';
+      set({ error: msg, isLoading: false });
+      // Re-throw so callers (e.g. AdminPage) can redirect on 401
+      throw error;
     } finally {
       set({ isLoading: false });
     }

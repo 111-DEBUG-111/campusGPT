@@ -19,8 +19,8 @@ google-generativeai = ">=0.7.0"
 FlagEmbedding = ">=1.2.10"
 sentence-transformers = ">=3.0.0"
 
-# Vector DB
-qdrant-client = ">=1.10.0"
+# Vector DB — pgvector on Neon PostgreSQL via asyncpg (no extra client package needed)
+# asyncpg is listed below under Database drivers
 
 # BM25
 rank-bm25 = ">=0.2.2"
@@ -31,6 +31,9 @@ pdfplumber = ">=0.11.0"
 
 # Database
 sqlalchemy = ">=2.0.0"
+# Database drivers
+asyncpg = ">=0.29.0"   # async PostgreSQL (Neon + pgvector)
+# aiosqlite kept for local dev/test fallback; asyncpg used for Neon
 aiosqlite = ">=0.20.0"
 greenlet = ">=3.0.0"
 

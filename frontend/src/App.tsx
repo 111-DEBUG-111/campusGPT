@@ -2,6 +2,11 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
+import { getSessionToken } from './lib/session';
+
+// Eagerly initialize the session token before any component renders.
+// This guarantees the UUID exists in localStorage before the first API call.
+getSessionToken();
 
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));

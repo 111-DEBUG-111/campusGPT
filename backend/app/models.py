@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, Integer, Float, Text,
-    DateTime, ForeignKey,
+    DateTime, ForeignKey, Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -21,6 +21,9 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Anonymous session token — identifies which browser session owns this conversation.
+    # NULL for legacy rows created before auth was introduced (they become invisible to users).
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="New Conversation")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -102,3 +105,9 @@ class AnalyticsEvent(Base):
     response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     retrieved_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+# NOTE: document_chunks table is managed via raw DDL in database.py
+# (see _apply_migrations). It uses the pgvector `vector` column type which
+# requires the extension to be enabled first — handled there.
+# We do not define an ORM model for it to avoid the pgvector Python package
+# dependency; all vector ops use raw SQL via asyncpg.

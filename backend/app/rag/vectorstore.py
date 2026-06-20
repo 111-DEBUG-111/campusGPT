@@ -1,119 +1,188 @@
 """
-Qdrant Vector Store Wrapper for CampusGPT.
+pgvector Vector Store for CampusGPT.
 
-Uses Qdrant Cloud Free tier — fully persistent, no ephemeral disk issues.
+Replaces the Qdrant Cloud backend with pgvector running inside the existing
+Neon PostgreSQL instance via asyncpg (already installed).
+
+Architecture notes:
+  - Uses asyncpg directly with asyncio.run() — this is safe because the
+    vectorstore is always called from a thread pool (run_in_threadpool),
+    never from the main async event loop.
+  - Cosine similarity via pgvector's <=> operator (cosine *distance*).
+    score returned = 1 - distance, so 1.0 = identical, 0.0 = orthogonal.
+  - INSERT … ON CONFLICT (id) DO UPDATE makes upserts idempotent.
+  - No pgvector Python package required — asyncpg handles the vector
+    literal strings natively as plain text parameters.
+  - Embedding dimension: hardcoded 1024 for BAAI/bge-m3.
 """
+import asyncio
 import logging
 import uuid
 from typing import Optional
-from qdrant_client import QdrantClient, AsyncQdrantClient
-from qdrant_client.models import (
-    Distance, VectorParams, PointStruct,
-    Filter, FieldCondition, MatchValue, MatchAny,
-    SearchRequest, ScoredPoint,
-    PayloadSchemaType,
-)
+
+import asyncpg
+
 from app.config import get_settings
-from app.rag.embedder import get_embedder
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_qdrant_client: "QdrantVectorStore | None" = None
+_pgvector_store: "PgVectorStore | None" = None
 
 
-class QdrantVectorStore:
+def _build_asyncpg_dsn() -> str:
     """
-    Async-compatible wrapper around Qdrant.
-    We use the sync client because FlagEmbedding is synchronous —
-    all heavy ops run in thread pool via FastAPI's run_in_threadpool.
+    Convert the SQLAlchemy DATABASE_URL to an asyncpg-native DSN.
+
+    SQLAlchemy prefix:  postgresql+asyncpg://user:pass@host/db
+    asyncpg native:     postgresql://user:pass@host/db
+    """
+    url = settings.database_url
+    return url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def _vec_str(v: list[float]) -> str:
+    """Format a float list as a pgvector literal: '[0.1,0.2,…]'"""
+    return "[" + ",".join(str(x) for x in v) + "]"
+
+
+class PgVectorStore:
+    """
+    Sync-compatible vector store backed by pgvector on Neon PostgreSQL.
+
+    Public interface is identical to the old QdrantVectorStore:
+      upsert_chunks(chunks)           → int
+      search(query_embedding, ...)    → list[dict]
+      delete_by_document_id(doc_id)  → int
+      fetch_all_chunks(limit)         → list[dict]
+      get_collection_info()           → dict
     """
 
     def __init__(self):
-        logger.info(f"Connecting to Qdrant at {settings.qdrant_url}")
-        self.client = QdrantClient(
-            url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key,
-            timeout=30,
-        )
-        self.collection = settings.qdrant_collection
-        self._ensure_collection()
-        logger.info("Qdrant connected ✓")
+        self._dsn = _build_asyncpg_dsn()
+        logger.info("PgVectorStore initialised (asyncpg → Neon PostgreSQL) ✓")
 
-    def _ensure_collection(self):
-        """Create collection if it doesn't already exist, then ensure payload indexes."""
-        embedder = get_embedder()
-        existing = [c.name for c in self.client.get_collections().collections]
+    # ── Internal helpers ──────────────────────────────────────────────────────
 
-        if self.collection not in existing:
-            logger.info(f"Creating Qdrant collection '{self.collection}' dim={embedder.dimension}")
-            self.client.create_collection(
-                collection_name=self.collection,
-                vectors_config=VectorParams(
-                    size=embedder.dimension,
-                    distance=Distance.COSINE,
-                ),
-            )
-            logger.info("Collection created ✓")
+    async def _get_conn(self) -> asyncpg.Connection:
+        """Open a single asyncpg connection with SSL required for Neon."""
+        return await asyncpg.connect(self._dsn, ssl="require")
 
-        # Ensure payload indexes.
-        # All calls are idempotent — safe on every startup regardless of
-        # whether the collection is new or pre-existing.
-        _indexes = [
-            ("document_id", PayloadSchemaType.INTEGER),
-            ("section_title", PayloadSchemaType.KEYWORD),
-            ("chunk_type", PayloadSchemaType.KEYWORD),
-        ]
-        for field_name, schema in _indexes:
-            self.client.create_payload_index(
-                collection_name=self.collection,
-                field_name=field_name,
-                field_schema=schema,
-            )
-        logger.info("Payload indexes ensured ✓ (document_id, section_title, chunk_type)")
+    def _run(self, coro):
+        """Run a coroutine synchronously (safe inside a threadpool thread)."""
+        return asyncio.run(coro)
 
-    # ─── Upsert ───────────────────────────────────────────────────────────────
+    # ── Upsert ────────────────────────────────────────────────────────────────
+
+    async def _upsert_chunks_async(self, chunks: list[dict]) -> int:
+        conn = await self._get_conn()
+        try:
+            sql = """
+                INSERT INTO document_chunks
+                    (id, document_id, filename, category, text, embedding,
+                     page_number, chunk_index,
+                     section_title, section_path, chunk_type, heading_level)
+                VALUES
+                    ($1, $2, $3, $4, $5, $6::vector,
+                     $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (id) DO UPDATE SET
+                    text          = EXCLUDED.text,
+                    embedding     = EXCLUDED.embedding,
+                    filename      = EXCLUDED.filename,
+                    category      = EXCLUDED.category,
+                    page_number   = EXCLUDED.page_number,
+                    chunk_index   = EXCLUDED.chunk_index,
+                    section_title = EXCLUDED.section_title,
+                    section_path  = EXCLUDED.section_path,
+                    chunk_type    = EXCLUDED.chunk_type,
+                    heading_level = EXCLUDED.heading_level
+            """
+            rows = [
+                (
+                    str(uuid.uuid4()),
+                    c["document_id"],
+                    c["filename"],
+                    c["category"],
+                    c["text"],
+                    _vec_str(c["embedding"]),
+                    c.get("page_number"),
+                    c["chunk_index"],
+                    c.get("section_title"),
+                    c.get("section_path"),
+                    c.get("chunk_type", "text"),
+                    c.get("heading_level"),
+                )
+                for c in chunks
+            ]
+            await conn.executemany(sql, rows)
+        finally:
+            await conn.close()
+        logger.info(f"Upserted {len(chunks)} chunks into pgvector")
+        return len(chunks)
 
     def upsert_chunks(self, chunks: list[dict]) -> int:
-        """
-        Upsert document chunks into Qdrant.
-
-        Required keys per chunk: text, embedding, document_id, filename,
-        category, chunk_index.
-        Optional keys (new semantic fields): page_number, section_title,
-        section_path, chunk_type, heading_level.
-        Missing optional keys default to None / "text" gracefully.
-        """
         if not chunks:
             return 0
+        return self._run(self._upsert_chunks_async(chunks))
 
-        points = []
-        for chunk in chunks:
-            points.append(
-                PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector=chunk["embedding"],
-                    payload={
-                        "text": chunk["text"],
-                        "document_id": chunk["document_id"],
-                        "filename": chunk["filename"],
-                        "category": chunk["category"],
-                        "page_number": chunk.get("page_number"),
-                        "chunk_index": chunk["chunk_index"],
-                        # ── Semantic metadata (new) ──────────────────────────
-                        "section_title": chunk.get("section_title"),
-                        "section_path": chunk.get("section_path"),
-                        "chunk_type": chunk.get("chunk_type", "text"),
-                        "heading_level": chunk.get("heading_level"),
-                    },
+    # ── Search ────────────────────────────────────────────────────────────────
+
+    async def _search_async(
+        self,
+        query_embedding: list[float],
+        top_k: int,
+        filter_category: Optional[str],
+    ) -> list[dict]:
+        conn = await self._get_conn()
+        try:
+            vec = _vec_str(query_embedding)
+            if filter_category:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, text, document_id, filename, category,
+                           page_number, chunk_index,
+                           section_title, section_path, chunk_type, heading_level,
+                           1 - (embedding <=> $1::vector) AS score
+                    FROM document_chunks
+                    WHERE category = $2
+                    ORDER BY embedding <=> $1::vector
+                    LIMIT $3
+                    """,
+                    vec, filter_category, top_k,
                 )
-            )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, text, document_id, filename, category,
+                           page_number, chunk_index,
+                           section_title, section_path, chunk_type, heading_level,
+                           1 - (embedding <=> $1::vector) AS score
+                    FROM document_chunks
+                    ORDER BY embedding <=> $1::vector
+                    LIMIT $2
+                    """,
+                    vec, top_k,
+                )
+        finally:
+            await conn.close()
 
-        self.client.upsert(collection_name=self.collection, points=points)
-        logger.info(f"Upserted {len(points)} chunks into Qdrant")
-        return len(points)
-
-    # ─── Search ───────────────────────────────────────────────────────────────
+        return [
+            {
+                "id": str(r["id"]),
+                "text": r["text"],
+                "score": float(r["score"]),
+                "document_id": r["document_id"],
+                "filename": r["filename"],
+                "category": r["category"],
+                "page_number": r["page_number"],
+                "chunk_index": r["chunk_index"] or 0,
+                "section_title": r["section_title"],
+                "section_path": r["section_path"],
+                "chunk_type": r["chunk_type"] or "text",
+                "heading_level": r["heading_level"],
+            }
+            for r in rows
+        ]
 
     def search(
         self,
@@ -121,102 +190,80 @@ class QdrantVectorStore:
         top_k: int = 20,
         filter_category: Optional[str] = None,
     ) -> list[dict]:
-        """
-        Vector similarity search.
-        Returns list of dicts with text, score, and metadata.
-        """
-        query_filter = None
-        if filter_category:
-            query_filter = Filter(
-                must=[FieldCondition(
-                    key="category",
-                    match=MatchValue(value=filter_category)
-                )]
+        return self._run(self._search_async(query_embedding, top_k, filter_category))
+
+    # ── Delete ────────────────────────────────────────────────────────────────
+
+    async def _delete_async(self, document_id: int) -> None:
+        conn = await self._get_conn()
+        try:
+            await conn.execute(
+                "DELETE FROM document_chunks WHERE document_id = $1", document_id
             )
-
-        response = self.client.query_points(
-            collection_name=self.collection,
-            query=query_embedding,
-            limit=top_k,
-            query_filter=query_filter,
-            with_payload=True,
-        )
-        results = response.points
-
-        return [
-            {
-                "id": str(r.id),
-                "text": r.payload["text"],
-                "score": r.score,
-                "document_id": r.payload["document_id"],
-                "filename": r.payload["filename"],
-                "category": r.payload["category"],
-                "page_number": r.payload.get("page_number"),
-                "chunk_index": r.payload.get("chunk_index", 0),
-                # Semantic metadata — None for legacy chunks without these fields
-                "section_title": r.payload.get("section_title"),
-                "section_path": r.payload.get("section_path"),
-                "chunk_type": r.payload.get("chunk_type", "text"),
-                "heading_level": r.payload.get("heading_level"),
-            }
-            for r in results
-        ]
-
-    # ─── Delete ───────────────────────────────────────────────────────────────
+        finally:
+            await conn.close()
 
     def delete_by_document_id(self, document_id: int) -> int:
-        """Delete all chunks belonging to a document."""
-        result = self.client.delete(
-            collection_name=self.collection,
-            points_selector=Filter(
-                must=[FieldCondition(
-                    key="document_id",
-                    match=MatchValue(value=document_id)
-                )]
-            ),
-        )
+        self._run(self._delete_async(document_id))
         logger.info(f"Deleted chunks for document_id={document_id}")
-        return 0  # Qdrant doesn't return count for filter deletes
+        return 0
 
-    # ─── Fetch all chunks (for BM25 rebuild) ─────────────────────────────────
+    # ── Fetch all (for BM25 rebuild) ──────────────────────────────────────────
 
-    def fetch_all_chunks(self, limit: int = 100_000) -> list[dict]:
-        """Scroll through all stored chunks for BM25 index rebuild."""
-        records, _ = self.client.scroll(
-            collection_name=self.collection,
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
+    async def _fetch_all_async(self, limit: int) -> list[dict]:
+        conn = await self._get_conn()
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT id, text, document_id, filename, category,
+                       page_number, chunk_index,
+                       section_title, section_path, chunk_type, heading_level
+                FROM document_chunks
+                LIMIT $1
+                """,
+                limit,
+            )
+        finally:
+            await conn.close()
+
         return [
             {
-                "id": str(r.id),
-                "text": r.payload["text"],
-                "document_id": r.payload["document_id"],
-                "filename": r.payload["filename"],
-                "category": r.payload["category"],
-                "page_number": r.payload.get("page_number"),
-                "chunk_index": r.payload.get("chunk_index", 0),
-                # Semantic metadata — None for legacy chunks
-                "section_title": r.payload.get("section_title"),
-                "section_path": r.payload.get("section_path"),
-                "chunk_type": r.payload.get("chunk_type", "text"),
-                "heading_level": r.payload.get("heading_level"),
+                "id": str(r["id"]),
+                "text": r["text"],
+                "document_id": r["document_id"],
+                "filename": r["filename"],
+                "category": r["category"],
+                "page_number": r["page_number"],
+                "chunk_index": r["chunk_index"] or 0,
+                "section_title": r["section_title"],
+                "section_path": r["section_path"],
+                "chunk_type": r["chunk_type"] or "text",
+                "heading_level": r["heading_level"],
             }
-            for r in records
+            for r in rows
         ]
 
+    def fetch_all_chunks(self, limit: int = 100_000) -> list[dict]:
+        return self._run(self._fetch_all_async(limit))
+
+    # ── Info ──────────────────────────────────────────────────────────────────
+
+    async def _info_async(self) -> dict:
+        conn = await self._get_conn()
+        try:
+            row = await conn.fetchrow("SELECT COUNT(*) AS total FROM document_chunks")
+        finally:
+            await conn.close()
+        total = row["total"] if row else 0
+        return {"vectors_count": total, "points_count": total}
+
     def get_collection_info(self) -> dict:
-        info = self.client.get_collection(self.collection)
-        return {
-            "vectors_count": info.vectors_count,
-            "points_count": info.points_count,
-        }
+        return self._run(self._info_async())
 
 
-def get_vectorstore() -> QdrantVectorStore:
-    """Return the singleton vector store."""
-    global _qdrant_client
-    if _qdrant_client is None:
-        _qdrant_client = QdrantVectorStore()
-    return _qdrant_client
+def get_vectorstore() -> PgVectorStore:
+    """Return the singleton pgvector store."""
+    global _pgvector_store
+    if _pgvector_store is None:
+        _pgvector_store = PgVectorStore()
+    return _pgvector_store
