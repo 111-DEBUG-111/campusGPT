@@ -1,4 +1,17 @@
 // Chat types
+
+/** Represents an in-flight conversation optimistically shown in the sidebar. */
+export type PendingConversationStatus = 'retrieving' | 'generating' | 'failed';
+
+export interface PendingConversation {
+  /** Temporary client-side ID (negative number so it never clashes with DB IDs) */
+  tempId: number;
+  title: string;
+  status: PendingConversationStatus;
+  startedAt: number; // Date.now()
+  error?: string;
+}
+
 export interface SourceCitation {
   document_id: string;
   filename: string;

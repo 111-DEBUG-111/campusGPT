@@ -15,6 +15,7 @@ sqlalchemy>=2.0.0
 asyncpg>=0.29.0
 aioboto3>=13.0.0
 slowapi>=0.1.9
+redis>=4.2.0          # required by slowapi for Redis-backed rate-limit storage
 python-dotenv>=1.0.0
 aiofiles>=23.2.0
 greenlet>=3.0.0

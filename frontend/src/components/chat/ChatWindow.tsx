@@ -1,8 +1,8 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
-import { Bot, GraduationCap, BookOpen, Building2, Users, Briefcase } from 'lucide-react';
+import { Bot, GraduationCap, RefreshCw } from 'lucide-react';
 
 const SUGGESTIONS = [
   { icon: '🎓', text: 'What is the minimum attendance requirement?', category: 'academics' },
@@ -16,7 +16,9 @@ const SUGGESTIONS = [
 export const ChatWindow: React.FC = () => {
   const {
     activeConversation,
+    activeConversationId,
     isLoading,
+    isBackgroundRefreshing,
     pendingUserMessage,
     sendMessage,
     error,
@@ -36,6 +38,9 @@ export const ChatWindow: React.FC = () => {
     sendMessage(text);
   };
 
+  // ── Cold-start skeleton: a chat is selected but nothing is in cache yet ──
+  const showSkeleton = isLoading && !activeConversation && activeConversationId !== null;
+
   return (
     <div className="chat-main">
       {/* Topbar */}
@@ -49,6 +54,13 @@ export const ChatWindow: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Background refresh pill — shown only during silent cache refresh */}
+          {isBackgroundRefreshing && (
+            <span className="bg-refresh-pill" aria-label="Refreshing in background">
+              <RefreshCw size={10} className="animate-spin" />
+              Refreshing…
+            </span>
+          )}
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           <span style={{ color: '#475569', fontSize: '12px' }}>Online</span>
         </div>
@@ -56,7 +68,15 @@ export const ChatWindow: React.FC = () => {
 
       {/* Messages */}
       <div className="chat-messages">
-        {!hasMessages ? (
+        {showSkeleton ? (
+          /* ── Cold-start skeleton ─────────────────────────────── */
+          <div className="skeleton-container">
+            <MessageSkeleton align="right" widths={['60%']} />
+            <MessageSkeleton align="left"  widths={['90%', '70%', '50%']} />
+            <MessageSkeleton align="right" widths={['45%']} />
+            <MessageSkeleton align="left"  widths={['80%', '55%']} />
+          </div>
+        ) : !hasMessages ? (
           <WelcomeScreen onSuggestion={handleSuggestion} />
         ) : (
           <>
@@ -118,6 +138,26 @@ export const ChatWindow: React.FC = () => {
     </div>
   );
 };
+
+// ── Skeleton loading rows ─────────────────────────────────────────────────────
+
+interface SkeletonProps {
+  align: 'left' | 'right';
+  widths: string[];
+}
+
+const MessageSkeleton: React.FC<SkeletonProps> = ({ align, widths }) => (
+  <div className={`skeleton-row-wrapper skeleton-${align}`}>
+    <div className="skeleton-avatar" />
+    <div className="skeleton-lines">
+      {widths.map((w, i) => (
+        <div key={i} className="skeleton-line" style={{ width: w }} />
+      ))}
+    </div>
+  </div>
+);
+
+// ── Welcome screen ────────────────────────────────────────────────────────────
 
 const WelcomeScreen: React.FC<{ onSuggestion: (text: string) => void }> = ({
   onSuggestion,

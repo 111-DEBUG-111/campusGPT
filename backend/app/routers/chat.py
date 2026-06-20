@@ -13,13 +13,13 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_session_token
-from app.limiter import limiter
+from app.limiter import limiter, is_duplicate_query
 from app.models import Conversation, Message
 from app.schemas import (
     ChatRequest, ChatResponse, ConversationOut,
     ConversationListItem, MessageOut, SourceCitation
 )
-from app.rag.pipeline import run_rag_pipeline
+from app.rag.pipeline import run_rag_pipeline, RagPipelineError
 from app.services.analytics_service import log_event
 from app.cache.response_cache import get_cached_response, set_cached_response, is_cacheable
 from app.cache.kb_version import get_kb_version
@@ -67,6 +67,15 @@ async def chat(
     Conversations are strictly scoped to the caller's session token.
     Rate-limited per IP: controlled by RATE_LIMIT_PER_MINUTE env var.
     """
+    # ── Deduplication: reject identical queries from the same IP within 5 s ──
+    # Catches double-click spam and rapid-fire identical submissions that slip
+    # through IP-based limits (e.g., many users behind a university NAT share
+    # one IP but rarely send the exact same query at the exact same second).
+    if is_duplicate_query(request, body.query):
+        raise HTTPException(
+            status_code=429,
+            detail="Duplicate request detected. Please wait a moment before resending the same query.",
+        )
     # ── Get or create conversation ───────────────────────────────────────────
     if body.conversation_id:
         # Ownership check: session_token must match
@@ -159,11 +168,16 @@ async def chat(
             query_time_ms=cache_lookup_ms,
         )
 
-    # ── Cache MISS — run the full RAG pipeline ───────────────────────────────
+    # ── Cache MISS — run the full RAG pipeline ───────────────────────────────────
     try:
         result = await run_in_threadpool(run_rag_pipeline, body.query, history)
+    except RagPipelineError as e:
+        # Classified error from the pipeline — forward the clean user message
+        # and the correct HTTP status code (429 for quota, 503 for auth/unavail, etc.)
+        logger.error(f"RAG pipeline error [{e.status_code}]: {e.user_message}")
+        raise HTTPException(status_code=e.status_code, detail=e.user_message)
     except Exception as e:
-        logger.error(f"RAG pipeline error: {e}")
+        logger.error(f"RAG pipeline unexpected error: {e}")
         raise HTTPException(status_code=500, detail="RAG pipeline failed. Please try again.")
 
     # ── Store result in cache (only if valid / not an error) ─────────────────
