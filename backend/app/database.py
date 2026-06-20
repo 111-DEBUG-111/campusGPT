@@ -96,6 +96,17 @@ async def _apply_migrations(conn) -> None:
         # nullable: backfills gracefully; rows predating caching have NULL.
         "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN",
         "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS kb_version INTEGER",
+
+        # v1.4 — performance indexes on high-query columns
+        # These prevent full-table scans on the most frequent WHERE / ORDER BY paths.
+        # analytics_events.event_type — every aggregation query filters on this
+        "CREATE INDEX IF NOT EXISTS ix_analytics_events_event_type ON analytics_events (event_type)",
+        # analytics_events.created_at — WHERE created_at >= thirty_days_ago range scans
+        "CREATE INDEX IF NOT EXISTS ix_analytics_events_created_at ON analytics_events (created_at)",
+        # messages.created_at — ORDER BY created_at in every conversation fetch
+        "CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages (created_at)",
+        # documents.status — WHERE status = 'indexed' filter in document listing
+        "CREATE INDEX IF NOT EXISTS ix_documents_status ON documents (status)",
     ]
     for sql in migrations:
         await conn.execute(text(sql))

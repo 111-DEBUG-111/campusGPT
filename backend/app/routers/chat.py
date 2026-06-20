@@ -227,31 +227,29 @@ async def list_conversations(
     session_token: str = Depends(get_session_token),
 ):
     """List conversations that belong to the caller's session."""
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.session_id == session_token)   # ← isolation
+    # Single JOIN query — avoids N+1 (one COUNT query per conversation).
+    # outerjoin ensures conversations with zero messages are still returned.
+    stmt = (
+        select(Conversation, func.count(Message.id).label("message_count"))
+        .outerjoin(Message, Message.conversation_id == Conversation.id)
+        .where(Conversation.session_id == session_token)
+        .group_by(Conversation.id)
         .order_by(Conversation.updated_at.desc())
         .offset(skip)
         .limit(limit)
     )
-    conversations = result.scalars().all()
+    rows = (await db.execute(stmt)).all()
 
-    output = []
-    for conv in conversations:
-        count_result = await db.scalar(
-            select(func.count()).select_from(Message)
-            .where(Message.conversation_id == conv.id)
+    return [
+        ConversationListItem(
+            id=conv.id,
+            title=conv.title,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            message_count=message_count,
         )
-        output.append(
-            ConversationListItem(
-                id=conv.id,
-                title=conv.title,
-                created_at=conv.created_at,
-                updated_at=conv.updated_at,
-                message_count=count_result or 0,
-            )
-        )
-    return output
+        for conv, message_count in rows
+    ]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)
