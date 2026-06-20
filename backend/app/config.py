@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     max_context_chunks: int = 5
     max_query_rewrites: int = 3
 
+    # ─── Response Cache (Upstash Redis) ───────────────────────────────────────
+    # Set CACHE_ENABLED=false to disable caching entirely (e.g. during testing).
+    cache_enabled: bool = True
+    # Upstash REST credentials — obtain from console.upstash.com
+    upstash_redis_url: str | None = None
+    upstash_redis_token: str | None = None
+    # Time-to-live for cached RAG responses.  Default: 24 hours.
+    # KB version bumps render old entries unreachable before TTL expiry,
+    # so TTL is just the final safety net for orphaned entries.
+    cache_ttl_seconds: int = 86400  # 24 hours
+
 
 @lru_cache
 def get_settings() -> Settings:

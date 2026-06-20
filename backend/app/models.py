@@ -104,6 +104,9 @@ class AnalyticsEvent(Base):
     conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     retrieved_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Cache tracking (added v1.3)
+    cache_hit: Mapped[bool | None] = mapped_column(nullable=True)
+    kb_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 # NOTE: document_chunks table is managed via raw DDL in database.py

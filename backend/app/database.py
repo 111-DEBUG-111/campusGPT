@@ -91,6 +91,11 @@ async def _apply_migrations(conn) -> None:
             USING ivfflat (embedding vector_cosine_ops)
             WITH (lists = 100)
         """,
+
+        # v1.3 — cache tracking columns on analytics_events
+        # nullable: backfills gracefully; rows predating caching have NULL.
+        "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN",
+        "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS kb_version INTEGER",
     ]
     for sql in migrations:
         await conn.execute(text(sql))
