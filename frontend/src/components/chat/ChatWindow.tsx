@@ -19,20 +19,25 @@ export const ChatWindow: React.FC = () => {
     activeConversationId,
     isLoading,
     isBackgroundRefreshing,
-    pendingUserMessage,
+    pendingMessages,
     sendMessage,
     error,
     clearError,
   } = useChatStore();
 
+  // The optimistic message for this specific conversation (survives chat switches).
+  // Uses sentinel key 0 for the "new chat" pane where activeConversationId is null.
+  const pendingUserMessage = pendingMessages[activeConversationId ?? 0] ?? null;
+  const isProcessing = pendingUserMessage !== null;
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasMessages =
-    (activeConversation?.messages?.length ?? 0) > 0 || pendingUserMessage;
+    (activeConversation?.messages?.length ?? 0) > 0 || isProcessing;
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages or when typing indicator appears/disappears
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeConversation?.messages, pendingUserMessage, isLoading]);
+  }, [activeConversation?.messages, isProcessing]);
 
   const handleSuggestion = (text: string) => {
     sendMessage(text);
@@ -98,8 +103,8 @@ export const ChatWindow: React.FC = () => {
               </div>
             )}
 
-            {/* Typing indicator */}
-            {isLoading && (
+            {/* Typing indicator — shown whenever this conversation has a pending message */}
+            {isProcessing && (
               <div className="message-bubble-wrapper message-assistant">
                 <div className="avatar avatar-bot">
                   <Bot size={16} />
