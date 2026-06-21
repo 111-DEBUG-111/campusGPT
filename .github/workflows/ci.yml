@@ -80,6 +80,25 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short
 
+      # Verify the committed requirements.lock stays in sync with pyproject.toml.
+      # Recompile into a temp file and diff — fail the build if they diverge.
+      # This prevents "lock file not updated" from silently reaching Render.
+      - name: Check requirements.lock is up to date
+        run: |
+          uv pip compile pyproject.toml --python-version 3.11 --output-file requirements.lock.new --quiet
+          # Compare only the pinned package lines (ignore the header comment which
+          # contains a timestamp that always differs).
+          grep -v '^#' requirements.lock     | sort > /tmp/lock_committed.txt
+          grep -v '^#' requirements.lock.new | sort > /tmp/lock_fresh.txt
+          if ! diff -u /tmp/lock_committed.txt /tmp/lock_fresh.txt; then
+            echo ""
+            echo "❌ requirements.lock is out of date!"
+            echo "   Run: cd backend && uv pip compile pyproject.toml --python-version 3.11 --output-file requirements.lock"
+            echo "   Then commit the updated requirements.lock."
+            exit 1
+          fi
+          echo "✅ requirements.lock is up to date"
+
   # ─── Frontend: TypeScript check + production build ───────────────────────────
   frontend:
     name: Frontend Build (Node 20)
