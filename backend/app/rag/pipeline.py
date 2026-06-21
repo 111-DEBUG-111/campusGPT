@@ -6,7 +6,8 @@ Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → Gemini R
 import logging
 import re
 import time
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from app.config import get_settings
 from app.rag.query_rewriter import rewrite_query
 from app.rag.retriever import hybrid_retrieve
@@ -42,7 +43,7 @@ def _classify_gemini_error(exc: Exception) -> RagPipelineError:
     # ── Quota / rate-limit (HTTP 429) ─────────────────────────────────────────
     if "429" in raw or "quota" in raw.lower() or "rate" in raw.lower():
         # Try to pull out the retry_delay so users know how long to wait
-        match = re.search(r"retry.*?in\s+(\d+)(\.\d+)?s", raw, re.IGNORECASE)
+        match = re.search(r"retry.*?in\s+(\d+)(\.\\d+)?s", raw, re.IGNORECASE)
         if match:
             wait = int(match.group(1)) + 1          # round up
             if wait >= 60:
@@ -92,18 +93,28 @@ def _classify_gemini_error(exc: Exception) -> RagPipelineError:
         status_code=500,
     )
 
-# ─── Gemini model singleton ────────────────────────────────────────────────────
-_gemini_model: genai.GenerativeModel | None = None
+
+# ─── Gemini client singleton ───────────────────────────────────────────────────
+# The new google-genai SDK uses genai.Client (not genai.GenerativeModel).
+# A single Client instance is reused across all requests — it manages its own
+# underlying HTTP connection pool and is thread-safe.
+_gemini_client: genai.Client | None = None
 
 
-def get_gemini_model() -> genai.GenerativeModel:
-    """Return the singleton Gemini GenerativeModel, creating it on first call."""
-    global _gemini_model
-    if _gemini_model is None:
-        genai.configure(api_key=settings.gemini_api_key)
-        _gemini_model = genai.GenerativeModel(settings.gemini_model)
-        logger.info(f"Gemini model '{settings.gemini_model}' initialised.")
-    return _gemini_model
+def get_gemini_client() -> genai.Client:
+    """Return the singleton google.genai Client, creating it on first call."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
+        logger.info(f"Gemini client initialised (model: '{settings.gemini_model}').")
+    return _gemini_client
+
+
+# Keep the old name as an alias so main.py's lifespan call (`get_gemini_model()`)
+# continues to work without changes there.
+def get_gemini_model() -> genai.Client:
+    """Alias for get_gemini_client() — preserves the lifespan hook in main.py."""
+    return get_gemini_client()
 
 
 SYSTEM_PROMPT = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
@@ -224,14 +235,16 @@ def run_rag_pipeline(
     history_text = format_history(history)
 
     # ── Step 4: Gemini Response ────────────────────────────────────────────────
-    model = get_gemini_model()
+    client = get_gemini_client()
 
     prompt = SYSTEM_PROMPT.format(context=context, history=history_text)
+    full_prompt = prompt + f"\n\nStudent question: {query}"
 
     try:
-        response = model.generate_content(
-            [{"role": "user", "parts": [prompt + f"\n\nStudent question: {query}"]}],
-            generation_config=genai.GenerationConfig(
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=2048,
             ),
