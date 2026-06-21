@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-base"
     reranker_top_k: int = 5
 
+    # ─── Model Cache (HuggingFace) ────────────────────────────────────────────
+    # Path where HuggingFace model weights are cached (HF_HOME env var).
+    # On Render free tier, set this to a persistent disk path (e.g. /data/hf_cache)
+    # to avoid re-downloading the embedding + reranker models (~500MB combined)
+    # on every cold start.  Defaults to /tmp/hf_cache (ephemeral, but avoids
+    # polluting the container's home directory).
+    hf_home: str = "/tmp/hf_cache"
+
     # ─── pgvector ─────────────────────────────────────────────────────────────
     # Hardcoded to 1024 for BAAI/bge-m3.  If you switch embedding models,
     # the document_chunks.embedding column must be dropped and recreated.

@@ -5,11 +5,12 @@ Startup sequence:
   1. Init Neon PostgreSQL DB (create tables if not exists)
   2. Load embedding model (BGE-small)
   3. Connect to pgvector
-  4. Rebuild BM25 index from pgvector
+  4. Load BM25 index (disk cache → pgvector rebuild fallback)
   5. Load reranker
   6. Initialise Gemini client
 """
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import nltk
@@ -21,6 +22,13 @@ from slowapi.errors import RateLimitExceeded
 from app.limiter import limiter
 
 from app.config import get_settings
+
+# Set HF_HOME *before* any HuggingFace/FlagEmbedding import so the model
+# cache lands on the configured directory.  On Render, point this at a
+# persistent disk (HF_HOME=/data/hf_cache) to avoid re-downloading weights
+# (~500MB) on every cold start.  Falls back to /tmp/hf_cache (ephemeral).
+os.environ.setdefault("HF_HOME", get_settings().hf_home)
+
 from app.database import init_db
 from app.rag.embedder import get_embedder
 from app.rag.vectorstore import get_vectorstore
@@ -29,6 +37,7 @@ from app.rag.reranker import get_reranker
 from app.rag.pipeline import get_gemini_model
 from app.services.document_service import rebuild_bm25_from_vectorstore
 from app.cache.client import ping_redis
+from app.cache.kb_version import get_kb_version
 
 # Import all routers
 from app.routers import chat, documents, feedback, analytics, health, admin_auth
@@ -66,9 +75,13 @@ async def lifespan(app: FastAPI):
     logger.info("Initialising pgvector store...")
     get_vectorstore()
 
-    # 4. Rebuild BM25 from pgvector
-    logger.info("Rebuilding BM25 index from pgvector...")
-    await rebuild_bm25_from_vectorstore()
+    # 4. Load BM25 — try disk cache first, rebuild from pgvector only if needed
+    logger.info("Loading BM25 index...")
+    current_kb_version = get_kb_version()   # fast Redis read (~10ms), 0 if Redis down
+    bm25 = get_bm25_index()
+    if not bm25.load_from_disk(current_kb_version):
+        logger.info("BM25 disk cache miss — rebuilding from pgvector (first cold start or KB changed)...")
+        await rebuild_bm25_from_vectorstore()
 
     # 5. Load reranker
     logger.info("Loading reranker model...")

@@ -129,11 +129,11 @@ async def process_document(
         vectorstore = get_vectorstore()
         await run_in_threadpool(vectorstore.upsert_chunks, chunks)
 
-        # ── Update BM25 ────────────────────────────────────────────────────────
+        # ── Update BM25 ─────────────────────────────────────────────────────────────────
         bm25 = get_bm25_index()
         bm25.add_chunks([{k: v for k, v in c.items() if k != "embedding"} for c in chunks])
 
-        # ── Update document status ─────────────────────────────────────────────
+        # ── Update document status ────────────────────────────────────────────────────────
         await db.execute(
             update(Document)
             .where(Document.id == document_id)
@@ -145,10 +145,16 @@ async def process_document(
         )
         await db.commit()
 
-        # ── Invalidate response cache ──────────────────────────────────────────
+        # ── Invalidate response cache ──────────────────────────────────────────────────────
         # Any cached answers may now be stale (new document changes KB content).
         new_version = await run_in_threadpool(bump_kb_version)
         logger.info(f"Document {document_id} indexed: {len(chunks)} chunks (kb_version={new_version})")
+
+        # ── Persist BM25 to disk ───────────────────────────────────────────────────────
+        # Save the updated index so the next restart can skip the pgvector fetch.
+        if new_version > 0:   # new_version == 0 means Redis is down — skip save
+            await run_in_threadpool(bm25.save_to_disk, new_version)
+
         return len(chunks)
 
     except Exception as e:
@@ -174,7 +180,7 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
     vectorstore = get_vectorstore()
     await run_in_threadpool(vectorstore.delete_by_document_id, document_id)
 
-    # Update BM25
+    # Update BM25 in-memory index
     bm25 = get_bm25_index()
     bm25.remove_by_document_id(document_id)
 
@@ -187,6 +193,11 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
 
     # Invalidate response cache — deleted document may be cited in cached answers.
     new_version = await run_in_threadpool(bump_kb_version)
+
+    # Persist the updated BM25 index to disk.
+    if new_version > 0:
+        await run_in_threadpool(bm25.save_to_disk, new_version)
+
     logger.info(f"Document {document_id} (key={doc.filename}) deleted (kb_version={new_version})")
 
 
@@ -201,4 +212,9 @@ async def rebuild_bm25_from_vectorstore() -> int:
     # Invalidate cache — reindexing may have changed KB content.
     new_version = await run_in_threadpool(bump_kb_version)
     logger.info(f"BM25 rebuilt from pgvector: {len(chunks)} chunks (kb_version={new_version})")
+
+    # Persist the freshly-built index so the next restart can use it.
+    if new_version > 0:
+        await run_in_threadpool(bm25.save_to_disk, new_version)
+
     return len(chunks)

@@ -1,15 +1,20 @@
 """
-BM25 Keyword Index — In-Memory, rebuilt from Qdrant on startup.
+BM25 Keyword Index — In-Memory, rebuilt from pgvector on startup.
 
-Since we use Qdrant Cloud (no local disk for vectors), the BM25 index
-is built by fetching all chunk texts from Qdrant at startup.
-This means no separate file storage needed — the Qdrant collection is
-the single source of truth.
+The index is also persisted to disk via pickle so that warm restarts can
+skip the full rebuild.  The pickle file stores the current KB version as
+a header; if the on-disk version doesn't match Redis, the file is
+ignored and the index is rebuilt from pgvector (then re-saved).
+
+Cache path: BM25_CACHE_DIR env var (default /tmp) / bm25_index.pkl
 """
 import logging
+import os
+import pickle
 import re
 import string
 import threading
+from pathlib import Path
 
 import nltk
 from nltk.stem import PorterStemmer
@@ -17,6 +22,14 @@ from nltk.corpus import stopwords
 from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Disk-cache path
+# Override BM25_CACHE_DIR to point at a Render persistent disk (e.g. /data)
+# so the index survives cold starts.  Falls back to /tmp (ephemeral).
+# ──────────────────────────────────────────────────────────────────────────────
+_CACHE_DIR = Path(os.getenv("BM25_CACHE_DIR", "/tmp"))
+_CACHE_PATH = _CACHE_DIR / "bm25_index.pkl"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # NLTK resource bootstrap (runs once, thread-safe)
@@ -241,6 +254,67 @@ class BM25Index:
                 results.append(chunk)
 
         return results
+
+    # ── Disk persistence ──────────────────────────────────────────────────────
+
+    def save_to_disk(self, kb_version: int) -> None:
+        """
+        Pickle the index to disk with the current KB version as a header.
+
+        The file is written atomically (temp file → rename) so a crash mid-write
+        never leaves a corrupted cache file.
+        """
+        try:
+            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "kb_version": kb_version,
+                "chunks": self._chunks,
+                "corpus": self._corpus,
+                "bm25": self._bm25,
+            }
+            tmp_path = _CACHE_PATH.with_suffix(".tmp")
+            with open(tmp_path, "wb") as f:
+                pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp_path.rename(_CACHE_PATH)
+            logger.info(
+                f"BM25 index persisted to disk "
+                f"({len(self._chunks)} chunks, kb_version={kb_version})"
+            )
+        except Exception as exc:
+            logger.warning(f"BM25 disk save failed (non-fatal): {exc}")
+
+    def load_from_disk(self, expected_kb_version: int) -> bool:
+        """
+        Try to restore the index from the on-disk pickle.
+
+        Returns True  → index loaded, skip pgvector rebuild.
+        Returns False → cache miss / stale / corrupt, caller must rebuild.
+        """
+        if not _CACHE_PATH.exists():
+            logger.info("BM25 disk cache not found — will rebuild from pgvector")
+            return False
+        try:
+            with open(_CACHE_PATH, "rb") as f:
+                payload = pickle.load(f)
+            cached_version = payload.get("kb_version", -1)
+            if cached_version != expected_kb_version:
+                logger.info(
+                    f"BM25 disk cache stale "
+                    f"(disk={cached_version}, expected={expected_kb_version}) "
+                    f"— rebuilding from pgvector"
+                )
+                return False
+            self._chunks = payload["chunks"]
+            self._corpus = payload["corpus"]
+            self._bm25 = payload["bm25"]
+            logger.info(
+                f"✅ BM25 index loaded from disk cache "
+                f"({len(self._chunks)} chunks, kb_version={expected_kb_version})"
+            )
+            return True
+        except Exception as exc:
+            logger.warning(f"BM25 disk cache load failed: {exc} — will rebuild from pgvector")
+            return False
 
     @property
     def chunk_count(self) -> int:
