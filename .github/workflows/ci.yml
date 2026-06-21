@@ -69,6 +69,13 @@ jobs:
       # We supply safe dummy values so pydantic-settings doesn't abort with a
       # ValidationError before a single test runs.  No real service is ever
       # contacted — all external calls are mocked inside the test files.
+      #
+      # IMPORTANT: CACHE_ENABLED is intentionally NOT set here.
+      # The default in Settings is True, which is what the cache tests expect.
+      # Tests that need caching disabled patch `app.cache.response_cache.settings`
+      # directly (e.g. test_set_skipped_when_cache_disabled).  Setting
+      # CACHE_ENABLED=false here would poison the @lru_cache Settings singleton
+      # for the entire test session and break tests that expect cache=enabled.
       - name: Run backend unit tests
         env:
           GEMINI_API_KEY: "ci-dummy-key"
@@ -76,7 +83,6 @@ jobs:
           STORAGE_ENDPOINT_URL: "https://dummy.supabase.co/storage/v1/s3"
           STORAGE_ACCESS_KEY_ID: "dummy-access-key"
           STORAGE_SECRET_ACCESS_KEY: "dummy-secret-key"
-          CACHE_ENABLED: "false"
         run: |
           python -m pytest tests/ -v --tb=short
 
