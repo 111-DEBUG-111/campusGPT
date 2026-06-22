@@ -50,12 +50,13 @@ class PgVectorStore:
     """
     Sync-compatible vector store backed by pgvector on Neon PostgreSQL.
 
-    Public interface is identical to the old QdrantVectorStore:
-      upsert_chunks(chunks)           → int
-      search(query_embedding, ...)    → list[dict]
-      delete_by_document_id(doc_id)  → int
-      fetch_all_chunks(limit)         → list[dict]
-      get_collection_info()           → dict
+    Public interface:
+      upsert_chunks(chunks)                          → int
+      search(query_embedding, ...)                   → list[dict]
+      delete_by_document_id(doc_id)                 → int
+      fetch_all_chunks(limit)                        → list[dict]
+      get_collection_info()                          → dict
+      update_source_metadata(document_id, ...)      → None
     """
 
     def __init__(self):
@@ -81,10 +82,12 @@ class PgVectorStore:
                 INSERT INTO document_chunks
                     (id, document_id, filename, category, text, embedding,
                      page_number, chunk_index,
-                     section_title, section_path, chunk_type, heading_level)
+                     section_title, section_path, chunk_type, heading_level,
+                     source_type, author)
                 VALUES
                     ($1, $2, $3, $4, $5, $6::vector,
-                     $7, $8, $9, $10, $11, $12)
+                     $7, $8, $9, $10, $11, $12,
+                     $13, $14)
                 ON CONFLICT (id) DO UPDATE SET
                     text          = EXCLUDED.text,
                     embedding     = EXCLUDED.embedding,
@@ -95,7 +98,9 @@ class PgVectorStore:
                     section_title = EXCLUDED.section_title,
                     section_path  = EXCLUDED.section_path,
                     chunk_type    = EXCLUDED.chunk_type,
-                    heading_level = EXCLUDED.heading_level
+                    heading_level = EXCLUDED.heading_level,
+                    source_type   = EXCLUDED.source_type,
+                    author        = EXCLUDED.author
             """
             rows = [
                 (
@@ -111,6 +116,8 @@ class PgVectorStore:
                     c.get("section_path"),
                     c.get("chunk_type", "text"),
                     c.get("heading_level"),
+                    c.get("source_type", "official"),
+                    c.get("author"),
                 )
                 for c in chunks
             ]
@@ -132,37 +139,42 @@ class PgVectorStore:
         query_embedding: list[float],
         top_k: int,
         filter_category: Optional[str],
+        filter_source_type: Optional[str],
     ) -> list[dict]:
         conn = await self._get_conn()
         try:
             vec = _vec_str(query_embedding)
+
+            # Build WHERE clause dynamically
+            where_clauses: list[str] = []
+            params: list = [vec]
+
             if filter_category:
-                rows = await conn.fetch(
-                    """
-                    SELECT id, text, document_id, filename, category,
-                           page_number, chunk_index,
-                           section_title, section_path, chunk_type, heading_level,
-                           1 - (embedding <=> $1::vector) AS score
-                    FROM document_chunks
-                    WHERE category = $2
-                    ORDER BY embedding <=> $1::vector
-                    LIMIT $3
-                    """,
-                    vec, filter_category, top_k,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT id, text, document_id, filename, category,
-                           page_number, chunk_index,
-                           section_title, section_path, chunk_type, heading_level,
-                           1 - (embedding <=> $1::vector) AS score
-                    FROM document_chunks
-                    ORDER BY embedding <=> $1::vector
-                    LIMIT $2
-                    """,
-                    vec, top_k,
-                )
+                params.append(filter_category)
+                where_clauses.append(f"category = ${len(params)}")
+            if filter_source_type:
+                params.append(filter_source_type)
+                where_clauses.append(f"source_type = ${len(params)}")
+
+            where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            params.append(top_k)
+            limit_param = f"${len(params)}"
+
+            rows = await conn.fetch(
+                f"""
+                SELECT id, text, document_id, filename, category,
+                       page_number, chunk_index,
+                       section_title, section_path, chunk_type, heading_level,
+                       source_type, author,
+                       1 - (embedding <=> $1::vector) AS score
+                FROM document_chunks
+                {where_sql}
+                ORDER BY embedding <=> $1::vector
+                LIMIT {limit_param}
+                """,
+                *params,
+            )
         finally:
             await conn.close()
 
@@ -180,6 +192,8 @@ class PgVectorStore:
                 "section_path": r["section_path"],
                 "chunk_type": r["chunk_type"] or "text",
                 "heading_level": r["heading_level"],
+                "source_type": r["source_type"] or "official",
+                "author": r["author"],
             }
             for r in rows
         ]
@@ -189,8 +203,11 @@ class PgVectorStore:
         query_embedding: list[float],
         top_k: int = 20,
         filter_category: Optional[str] = None,
+        filter_source_type: Optional[str] = None,
     ) -> list[dict]:
-        return self._run(self._search_async(query_embedding, top_k, filter_category))
+        return self._run(
+            self._search_async(query_embedding, top_k, filter_category, filter_source_type)
+        )
 
     # ── Delete ────────────────────────────────────────────────────────────────
 
@@ -208,6 +225,42 @@ class PgVectorStore:
         logger.info(f"Deleted chunks for document_id={document_id}")
         return 0
 
+    # ── Update source metadata (for PATCH endpoint) ───────────────────────────
+
+    async def _update_source_metadata_async(
+        self,
+        document_id: int,
+        source_type: str,
+        author: Optional[str],
+    ) -> None:
+        conn = await self._get_conn()
+        try:
+            await conn.execute(
+                """
+                UPDATE document_chunks
+                   SET source_type = $1,
+                       author      = $2
+                 WHERE document_id = $3
+                """,
+                source_type,
+                author,
+                document_id,
+            )
+        finally:
+            await conn.close()
+
+    def update_source_metadata(
+        self,
+        document_id: int,
+        source_type: str,
+        author: Optional[str],
+    ) -> None:
+        self._run(self._update_source_metadata_async(document_id, source_type, author))
+        logger.info(
+            f"Updated source_type={source_type}, author={author} "
+            f"for all chunks of document_id={document_id}"
+        )
+
     # ── Fetch all (for BM25 rebuild) ──────────────────────────────────────────
 
     async def _fetch_all_async(self, limit: int) -> list[dict]:
@@ -217,7 +270,8 @@ class PgVectorStore:
                 """
                 SELECT id, text, document_id, filename, category,
                        page_number, chunk_index,
-                       section_title, section_path, chunk_type, heading_level
+                       section_title, section_path, chunk_type, heading_level,
+                       source_type, author
                 FROM document_chunks
                 LIMIT $1
                 """,
@@ -239,6 +293,8 @@ class PgVectorStore:
                 "section_path": r["section_path"],
                 "chunk_type": r["chunk_type"] or "text",
                 "heading_level": r["heading_level"],
+                "source_type": r["source_type"] or "official",
+                "author": r["author"],
             }
             for r in rows
         ]

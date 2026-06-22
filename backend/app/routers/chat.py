@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/api", tags=["chat"])
 
+_VALID_MODES = {"hybrid", "official", "experience"}
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,16 @@ async def _get_owned_conversation(
     return conv
 
 
+def _cache_key_with_mode(query: str, knowledge_mode: str) -> str:
+    """
+    Produce a cache-lookup key that includes the knowledge mode so that
+    'hybrid', 'official', and 'experience' results are never mixed.
+    We prefix the query with the mode separated by a null byte (unlikely
+    to appear in real queries) before hashing.
+    """
+    return f"{knowledge_mode}\x00{query}"
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
@@ -68,29 +80,39 @@ async def chat(
     Rate-limited per IP: controlled by RATE_LIMIT_PER_MINUTE env var.
     """
     # ── Deduplication: reject identical queries from the same IP within 5 s ──
-    # Catches double-click spam and rapid-fire identical submissions that slip
-    # through IP-based limits (e.g., many users behind a university NAT share
-    # one IP but rarely send the exact same query at the exact same second).
     if is_duplicate_query(request, body.query):
         raise HTTPException(
             status_code=429,
             detail="Duplicate request detected. Please wait a moment before resending the same query.",
         )
+
     # ── Get or create conversation ───────────────────────────────────────────
     if body.conversation_id:
         # Ownership check: session_token must match
         conversation = await _get_owned_conversation(
             body.conversation_id, session_token, db
         )
+        # Determine effective knowledge mode:
+        # - If the client sent a mode, honour it and persist the change.
+        # - Otherwise, use the conversation's stored mode.
+        if body.knowledge_mode and body.knowledge_mode != conversation.knowledge_mode:
+            conversation.knowledge_mode = body.knowledge_mode
+            await db.flush()
+        effective_mode = conversation.knowledge_mode
     else:
+        # New conversation — use the client-supplied mode (or default to hybrid).
+        effective_mode = body.knowledge_mode or "hybrid"
         # Auto-title from first message
         title = body.query[:60] + ("..." if len(body.query) > 60 else "")
-        conversation = Conversation(title=title, session_id=session_token)
+        conversation = Conversation(
+            title=title,
+            session_id=session_token,
+            knowledge_mode=effective_mode,
+        )
         db.add(conversation)
         await db.flush()
 
     # ── Load conversation history (last 5 turns = 10 messages) ───────────────
-    # Subquery: grab the 10 most-recent messages ordered DESC
     recent_subq = (
         select(Message)
         .where(Message.conversation_id == conversation.id)
@@ -98,7 +120,6 @@ async def chat(
         .limit(10)
         .subquery()
     )
-    # Outer query: re-order them ASC so the LLM sees correct chronology
     history_result = await db.execute(
         select(Message)
         .where(Message.id.in_(select(recent_subq.c.id)))
@@ -117,25 +138,23 @@ async def chat(
     await db.flush()
 
     # ── Run RAG pipeline (or serve from cache) ──────────────────────────────
-    # Snapshot the KB version before the cache lookup so both the GET and
-    # the log_event() call see a consistent version for this request.
     kb_version = await run_in_threadpool(get_kb_version)
     cache_start = time.monotonic()
-    cached = await run_in_threadpool(get_cached_response, body.query)
+    # Cache key includes mode to prevent cross-mode cache collisions
+    cache_query = _cache_key_with_mode(body.query, effective_mode)
+    cached = await run_in_threadpool(get_cached_response, cache_query)
     cache_lookup_ms = (time.monotonic() - cache_start) * 1000
 
     if cached is not None:
         # ── Cache HIT ──────────────────────────────────────────────────────────────
         logger.info(
-            "Cache HIT for query '%s...' (%.1f ms lookup)",
+            "Cache HIT for query '%s...' mode=%s (%.1f ms lookup)",
             body.query[:40],
+            effective_mode,
             cache_lookup_ms,
         )
         sources = [SourceCitation(**s) for s in cached.get("sources", [])]
 
-        # Always insert a real Message row so feedback routes continue to work.
-        # The cached answer is stored verbatim; the message_id is returned to
-        # the client so they can submit feedback on this specific response.
         sources_json = json.dumps([s.model_dump() for s in sources])
         assistant_message = Message(
             conversation_id=conversation.id,
@@ -147,8 +166,6 @@ async def chat(
         await db.commit()
         await db.refresh(assistant_message)
 
-        # Analytics: record the hit even though the pipeline didn't run.
-        # response_time_ms reflects the actual user-perceived latency (fast).
         await log_event(
             db=db,
             event_type="query",
@@ -166,14 +183,15 @@ async def chat(
             answer=cached["answer"],
             sources=sources,
             query_time_ms=cache_lookup_ms,
+            knowledge_mode=effective_mode,
         )
 
     # ── Cache MISS — run the full RAG pipeline ───────────────────────────────────
     try:
-        result = await run_in_threadpool(run_rag_pipeline, body.query, history)
+        result = await run_in_threadpool(
+            run_rag_pipeline, body.query, history, effective_mode
+        )
     except RagPipelineError as e:
-        # Classified error from the pipeline — forward the clean user message
-        # and the correct HTTP status code (429 for quota, 503 for auth/unavail, etc.)
         logger.error(f"RAG pipeline error [{e.status_code}]: {e.user_message}")
         raise HTTPException(status_code=e.status_code, detail=e.user_message)
     except Exception as e:
@@ -182,7 +200,7 @@ async def chat(
 
     # ── Store result in cache (only if valid / not an error) ─────────────────
     if is_cacheable(result):
-        await run_in_threadpool(set_cached_response, body.query, result)
+        await run_in_threadpool(set_cached_response, cache_query, result)
 
     # ── Store assistant message ────────────────────────────────────────────
     sources_json = json.dumps([s.model_dump() for s in result["sources"]])
@@ -214,6 +232,7 @@ async def chat(
         answer=result["answer"],
         sources=result["sources"],
         query_time_ms=result["query_time_ms"],
+        knowledge_mode=effective_mode,
     )
 
 
@@ -227,8 +246,6 @@ async def list_conversations(
     session_token: str = Depends(get_session_token),
 ):
     """List conversations that belong to the caller's session."""
-    # Single JOIN query — avoids N+1 (one COUNT query per conversation).
-    # outerjoin ensures conversations with zero messages are still returned.
     stmt = (
         select(Conversation, func.count(Message.id).label("message_count"))
         .outerjoin(Message, Message.conversation_id == Conversation.id)
@@ -275,6 +292,7 @@ async def get_conversation(
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+        knowledge_mode=conversation.knowledge_mode,
         messages=[
             MessageOut(
                 id=m.id,

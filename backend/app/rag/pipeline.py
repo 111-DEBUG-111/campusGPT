@@ -2,6 +2,7 @@
 Full RAG Pipeline Orchestrator for CampusGPT.
 
 Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → Gemini Response
+Supports three Knowledge Source Modes: hybrid | official | experience
 """
 import logging
 import re
@@ -95,9 +96,6 @@ def _classify_gemini_error(exc: Exception) -> RagPipelineError:
 
 
 # ─── Gemini client singleton ───────────────────────────────────────────────────
-# The new google-genai SDK uses genai.Client (not genai.GenerativeModel).
-# A single Client instance is reused across all requests — it manages its own
-# underlying HTTP connection pool and is thread-safe.
 _gemini_client: genai.Client | None = None
 
 
@@ -117,7 +115,9 @@ def get_gemini_model() -> genai.Client:
     return get_gemini_client()
 
 
-SYSTEM_PROMPT = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
+# ─── Mode-aware system prompts ─────────────────────────────────────────────────
+
+_SYSTEM_PROMPT_HYBRID = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
 
 You answer questions about academics, placements, clubs, internships, campus life, hostel facilities, and university policies.
 
@@ -126,8 +126,17 @@ Guidelines:
 - If the context doesn't contain enough information, say so honestly — don't make things up
 - Be friendly, concise, and helpful (like an experienced senior student)
 - Use bullet points or numbered lists when listing multiple things
-- Cite your sources naturally in the response (e.g., "According to the Academic Handbook...")
 - If a question is outside the university context, gently redirect back to campus topics
+
+IMPORTANT — Source Separation Rules (Hybrid Mode):
+- When both official documents AND student experience sources are present in the context, you MUST separate them into two clearly labeled sections:
+  ### Official Information
+  (facts from official university documents, policies, handbooks)
+  ### Student Insight
+  (advice, observations, and practical tips from student experiences)
+- Never blend official facts with personal experiences in the same sentence or paragraph.
+- Never present a student's personal experience as official university policy.
+- If only one source type is present, you may omit the other section entirely.
 
 Context from university knowledge base:
 {context}
@@ -136,15 +145,73 @@ Conversation history:
 {history}
 """
 
+_SYSTEM_PROMPT_OFFICIAL = """You are CampusGPT, a precise AI assistant for university students.
+
+You answer questions strictly based on official university documents.
+
+Guidelines:
+- Answer ONLY using the provided official document context
+- If information is not available in the official documents, clearly state: "This information is not available in official university documents."
+- Do NOT supplement with personal opinions, student experiences, or information not in the context
+- Be precise, factual, and formal
+- Cite the source document naturally (e.g., "According to the Academic Handbook...")
+- If a question is outside the university context, gently redirect back to campus topics
+
+Context from official university documents:
+{context}
+
+Conversation history:
+{history}
+"""
+
+_SYSTEM_PROMPT_EXPERIENCE = """You are CampusGPT, a friendly AI assistant sharing student perspectives for university students.
+
+You answer questions based on student experience and personal insights.
+
+Guidelines:
+- Answer based on the student experience context provided
+- ALWAYS include a clear disclaimer: these responses are based on student experiences and personal opinions, and may NOT represent official university policy
+- Present insights as student perspectives, not facts (e.g., "Based on student experiences...", "Students have found that...", "One student shared...")
+- Do not present any experience-based content as official university policy
+- Be friendly, conversational, and relatable — like advice from a senior student
+- If a question requires official policy information, recommend checking official university documents
+- If a question is outside the university context, gently redirect back to campus topics
+
+Context from student experiences:
+{context}
+
+Conversation history:
+{history}
+"""
+
+_SYSTEM_PROMPTS = {
+    "hybrid": _SYSTEM_PROMPT_HYBRID,
+    "official": _SYSTEM_PROMPT_OFFICIAL,
+    "experience": _SYSTEM_PROMPT_EXPERIENCE,
+}
+
+
+def _get_system_prompt(knowledge_mode: str) -> str:
+    return _SYSTEM_PROMPTS.get(knowledge_mode, _SYSTEM_PROMPT_HYBRID)
+
+
+# ─── Context formatting ────────────────────────────────────────────────────────
 
 def format_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into a readable context block for Gemini."""
+    """Format retrieved chunks into a readable context block for Gemini.
+    Source type labels are included so the LLM can correctly attribute each chunk.
+    """
     if not chunks:
         return "No relevant documents found in the knowledge base."
 
     context_parts = []
     for i, chunk in enumerate(chunks, start=1):
-        # Build source label: filename + page + section breadcrumb
+        # Build source label: filename + page + section breadcrumb + source type
+        source_type = chunk.get("source_type", "official")
+        source_label = "Official Document" if source_type == "official" else "Student Experience"
+        if chunk.get("author"):
+            source_label += f" ({chunk['author']})"
+
         source_info = f"[Source {i}: {chunk['filename']}"
         if chunk.get("page_number"):
             source_info += f", Page {chunk['page_number']}"
@@ -152,7 +219,7 @@ def format_context(chunks: list[dict]) -> str:
             source_info += f", Section: {chunk['section_path']}"
         elif chunk.get("section_title"):
             source_info += f", Section: {chunk['section_title']}"
-        source_info += f", Category: {chunk['category']}]"
+        source_info += f", Category: {chunk['category']}, Type: {source_label}]"
 
         context_parts.append(f"{source_info}\n{chunk['text']}")
 
@@ -190,6 +257,9 @@ def chunks_to_citations(chunks: list[dict]) -> list[SourceCitation]:
                 section_title=chunk.get("section_title"),
                 section_path=chunk.get("section_path"),
                 chunk_type=chunk.get("chunk_type"),
+                # Knowledge Source metadata
+                source_type=chunk.get("source_type", "official"),
+                author=chunk.get("author"),
             )
         )
     return citations
@@ -198,6 +268,7 @@ def chunks_to_citations(chunks: list[dict]) -> list[SourceCitation]:
 def run_rag_pipeline(
     query: str,
     conversation_history: list[dict] | None = None,
+    knowledge_mode: str = "hybrid",
 ) -> dict:
     """
     Full RAG pipeline.
@@ -205,6 +276,7 @@ def run_rag_pipeline(
     Args:
         query: User's question
         conversation_history: List of {"role": str, "content": str} dicts
+        knowledge_mode: "hybrid" | "official" | "experience"
 
     Returns:
         {
@@ -212,32 +284,35 @@ def run_rag_pipeline(
             "sources": list[SourceCitation],
             "retrieved_chunks": int,
             "query_time_ms": float,
+            "knowledge_mode": str,
         }
     """
     start_time = time.time()
     history = conversation_history or []
 
     # ── Step 1: Query Rewriting ────────────────────────────────────────────────
-    logger.info(f"RAG pipeline started for query: {query[:80]}...")
+    logger.info(f"RAG pipeline started for query: {query[:80]}... (mode={knowledge_mode})")
     rewritten_queries = rewrite_query(query)
     logger.info(f"Query rewrites: {rewritten_queries}")
 
-    # ── Step 2: Hybrid Retrieval ───────────────────────────────────────────────
+    # ── Step 2: Hybrid Retrieval (mode-filtered) ───────────────────────────────
     chunks = hybrid_retrieve(
         query=query,
         queries=rewritten_queries,
         top_k_rerank=settings.max_context_chunks,
+        knowledge_mode=knowledge_mode,
     )
-    logger.info(f"Retrieved {len(chunks)} final chunks after reranking")
+    logger.info(f"Retrieved {len(chunks)} final chunks after reranking (mode={knowledge_mode})")
 
     # ── Step 3: Context Assembly ───────────────────────────────────────────────
     context = format_context(chunks)
     history_text = format_history(history)
 
-    # ── Step 4: Gemini Response ────────────────────────────────────────────────
+    # ── Step 4: Gemini Response (mode-aware prompt) ────────────────────────────
     client = get_gemini_client()
 
-    prompt = SYSTEM_PROMPT.format(context=context, history=history_text)
+    system_prompt = _get_system_prompt(knowledge_mode)
+    prompt = system_prompt.format(context=context, history=history_text)
     full_prompt = prompt + f"\n\nStudent question: {query}"
 
     try:
@@ -252,9 +327,6 @@ def run_rag_pipeline(
         answer = response.text.strip()
     except Exception as e:
         logger.error(f"Gemini generation failed: {e}")
-        # Convert to a structured error with a clean user message and HTTP
-        # status code.  The router catches RagPipelineError specifically and
-        # returns the right HTTP status + detail — no internal details leaked.
         raise _classify_gemini_error(e) from e
 
     # ── Step 5: Citations ──────────────────────────────────────────────────────
@@ -268,6 +340,7 @@ def run_rag_pipeline(
         "sources": citations,
         "retrieved_chunks": len(chunks),
         "query_time_ms": elapsed_ms,
+        "knowledge_mode": knowledge_mode,
         # is_error=False signals to the cache layer that this result is safe
         # to store.  The cache checks this flag before every SET operation.
         "is_error": False,

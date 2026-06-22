@@ -1,13 +1,16 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, X, Loader2 } from 'lucide-react';
+import { Upload, FileText, X, Loader2, ShieldCheck, GraduationCap } from 'lucide-react';
 import { useAdminStore } from '../../stores/adminStore';
 import { DOCUMENT_CATEGORIES } from '../../types';
+import type { DocumentSourceType } from '../../types';
 
 export const DocumentUpload: React.FC = () => {
   const { uploadDocument, isUploading } = useAdminStore();
   const [file, setFile] = useState<File | null>(null);
   const [category, setCategory] = useState('general');
   const [description, setDescription] = useState('');
+  const [sourceType, setSourceType] = useState<DocumentSourceType>('official');
+  const [author, setAuthor] = useState('');
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -35,10 +38,18 @@ export const DocumentUpload: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
-    await uploadDocument(file, category, description);
+    await uploadDocument(
+      file,
+      category,
+      description,
+      sourceType,
+      sourceType === 'experience' ? author.trim() || undefined : undefined,
+    );
     setFile(null);
     setDescription('');
     setCategory('general');
+    setSourceType('official');
+    setAuthor('');
   };
 
   const formatSize = (bytes: number) => {
@@ -113,6 +124,119 @@ export const DocumentUpload: React.FC = () => {
           </div>
         )}
 
+        {/* Knowledge Source — required */}
+        <div>
+          <label className="form-label" htmlFor="doc-source-type">
+            Knowledge Source <span style={{ color: '#ef4444', marginLeft: '2px' }}>*</span>
+          </label>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '8px',
+              marginTop: '6px',
+            }}
+          >
+            {/* Official option */}
+            <button
+              type="button"
+              id="source-official"
+              onClick={() => setSourceType('official')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: sourceType === 'official'
+                  ? '2px solid #38bdf8'
+                  : '1px solid #1f2330',
+                background: sourceType === 'official'
+                  ? 'rgba(56, 189, 248, 0.1)'
+                  : 'rgba(255,255,255,0.02)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <ShieldCheck
+                size={16}
+                style={{ color: sourceType === 'official' ? '#38bdf8' : '#475569', flexShrink: 0 }}
+              />
+              <div style={{ textAlign: 'left' }}>
+                <p style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: sourceType === 'official' ? '#38bdf8' : '#94a3b8',
+                  lineHeight: 1.2,
+                }}>
+                  Official Document
+                </p>
+                <p style={{ fontSize: '10px', color: '#475569', lineHeight: 1.3, marginTop: '2px' }}>
+                  Policies, handbooks, rules
+                </p>
+              </div>
+            </button>
+
+            {/* Student Experience option */}
+            <button
+              type="button"
+              id="source-experience"
+              onClick={() => setSourceType('experience')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: sourceType === 'experience'
+                  ? '2px solid #fb923c'
+                  : '1px solid #1f2330',
+                background: sourceType === 'experience'
+                  ? 'rgba(251, 146, 60, 0.1)'
+                  : 'rgba(255,255,255,0.02)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <GraduationCap
+                size={16}
+                style={{ color: sourceType === 'experience' ? '#fb923c' : '#475569', flexShrink: 0 }}
+              />
+              <div style={{ textAlign: 'left' }}>
+                <p style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: sourceType === 'experience' ? '#fb923c' : '#94a3b8',
+                  lineHeight: 1.2,
+                }}>
+                  Student Experience
+                </p>
+                <p style={{ fontSize: '10px', color: '#475569', lineHeight: 1.3, marginTop: '2px' }}>
+                  Personal insights, tips
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Author — only shown for Student Experience */}
+        {sourceType === 'experience' && (
+          <div>
+            <label className="form-label" htmlFor="doc-author">
+              Author <span style={{ color: '#475569' }}>(optional)</span>
+            </label>
+            <input
+              id="doc-author"
+              type="text"
+              className="form-input"
+              placeholder="e.g. Divyansh Rathore"
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              maxLength={255}
+            />
+          </div>
+        )}
+
         {/* Category */}
         <div>
           <label className="form-label" htmlFor="doc-category">Category</label>
@@ -155,12 +279,12 @@ export const DocumentUpload: React.FC = () => {
           {isUploading ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              Uploading & Indexing…
+              Uploading &amp; Indexing…
             </>
           ) : (
             <>
               <Upload size={16} />
-              Upload & Index Document
+              Upload &amp; Index Document
             </>
           )}
         </button>

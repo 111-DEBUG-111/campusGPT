@@ -107,6 +107,20 @@ async def _apply_migrations(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages (created_at)",
         # documents.status — WHERE status = 'indexed' filter in document listing
         "CREATE INDEX IF NOT EXISTS ix_documents_status ON documents (status)",
+
+        # v2.0 — Knowledge Source Modes
+        # source_type column on documents: 'official' | 'experience'
+        # Existing rows get DEFAULT 'official' automatically.
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'official'",
+        # author: populated for student-experience documents
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS author VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS ix_documents_source_type ON documents (source_type)",
+        # knowledge_mode on conversations: 'hybrid' | 'official' | 'experience'
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS knowledge_mode VARCHAR(20) NOT NULL DEFAULT 'hybrid'",
+        # source_type / author on document_chunks — inherits from parent document
+        "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'official'",
+        "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS author VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS ix_dc_source_type ON document_chunks (source_type)",
     ]
     for sql in migrations:
         await conn.execute(text(sql))

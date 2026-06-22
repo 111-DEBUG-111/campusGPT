@@ -1,5 +1,5 @@
 """
-Documents Router — Admin upload, indexing, listing, deletion.
+Documents Router — Admin upload, indexing, listing, deletion, and source editing.
 Protected by ADMIN_API_KEY header.
 """
 import logging
@@ -15,9 +15,10 @@ from app.database import get_db, AsyncSessionLocal
 from app.dependencies import verify_admin_cookie
 from app.limiter import limiter
 from app.models import Document
-from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse
+from app.schemas import DocumentOut, DocumentListResponse, ReindexResponse, DocumentUpdate
 from app.services.document_service import (
-    save_upload, process_document, delete_document, rebuild_bm25_from_vectorstore
+    save_upload, process_document, delete_document,
+    rebuild_bm25_from_vectorstore, update_document_source,
 )
 from app.cache.response_cache import flush_response_cache
 
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 MAX_SIZE_BYTES = settings.max_upload_size_mb * 1024 * 1024
-
+ALLOWED_SOURCE_TYPES = {"official", "experience"}
 
 
 @router.post("/upload", response_model=DocumentOut)
@@ -38,6 +39,8 @@ async def upload_document(
     file: UploadFile = File(...),
     category: str = Form(default="general"),
     description: str = Form(default=""),
+    source_type: str = Form(default="official"),   # mandatory — "official" | "experience"
+    author: str = Form(default=""),                # optional; only meaningful for experience
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_admin_cookie),
 ):
@@ -45,7 +48,15 @@ async def upload_document(
     Upload a PDF/TXT/MD document and trigger background indexing.
 
     Supported categories: general, academics, placements, hostel, clubs, policies, faq
+    Knowledge Source: official | experience
     """
+    # Validate source type
+    if source_type not in ALLOWED_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source_type '{source_type}'. Must be one of: {', '.join(sorted(ALLOWED_SOURCE_TYPES))}",
+        )
+
     # Validate file type
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -70,6 +81,9 @@ async def upload_document(
     # Upload to Cloudflare R2
     r2_key, file_size = await save_upload(file)
 
+    # Normalise optional author
+    clean_author = author.strip() or None
+
     # Create DB record  (filename stores the R2 object key)
     doc = Document(
         filename=r2_key,
@@ -78,12 +92,17 @@ async def upload_document(
         description=description or None,
         status="pending",
         file_size_bytes=file_size,
+        source_type=source_type,
+        author=clean_author,
     )
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
 
-    logger.info(f"Document uploaded: {file.filename} → R2 key={r2_key}, id={doc.id}, queued for indexing")
+    logger.info(
+        f"Document uploaded: {file.filename} → R2 key={r2_key}, id={doc.id}, "
+        f"source_type={source_type}, author={clean_author}, queued for indexing"
+    )
 
     async def _index_in_background():
         """Creates its own DB session — safe to run after the request session closes."""
@@ -95,6 +114,8 @@ async def upload_document(
                     filename=file.filename,
                     category=category,
                     db=bg_db,
+                    source_type=source_type,
+                    author=clean_author,
                 )
             except Exception as e:
                 logger.error(f"Background indexing failed for doc {doc.id}: {e}")
@@ -133,6 +154,46 @@ async def delete_doc(
         raise HTTPException(status_code=404, detail="Document not found")
 
     await delete_document(document_id, db)
+
+
+@router.patch("/documents/{document_id}", response_model=DocumentOut)
+@limiter.limit("20/minute")
+async def update_doc(
+    request: Request,
+    document_id: int,
+    body: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_admin_cookie),
+):
+    """
+    Update a document's source classification (and optionally category/author).
+
+    When source_type changes:
+    - All document_chunks are updated to reflect the new source_type/author.
+    - The response cache is flushed immediately.
+    - The KB version is bumped.
+    """
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Determine effective values (keep existing if not provided in patch)
+    new_source_type = body.source_type if body.source_type is not None else doc.source_type
+    new_author = body.author if body.author is not None else doc.author
+    new_category = body.category if body.category is not None else None  # None = unchanged
+
+    await update_document_source(
+        document_id=document_id,
+        source_type=new_source_type,
+        author=new_author,
+        category=new_category,
+        db=db,
+    )
+
+    # Re-fetch updated doc to return
+    await db.refresh(doc)
+    return doc
 
 
 @router.post("/reindex", response_model=ReindexResponse)

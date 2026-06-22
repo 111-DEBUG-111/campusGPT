@@ -45,12 +45,22 @@ def reciprocal_rank_fusion(
     return fused
 
 
+def _mode_to_source_filter(knowledge_mode: str) -> str | None:
+    """Convert a knowledge mode string to a source_type filter value."""
+    if knowledge_mode == "official":
+        return "official"
+    if knowledge_mode == "experience":
+        return "experience"
+    return None  # hybrid — no filter
+
+
 def hybrid_retrieve(
     query: str,
     queries: list[str] | None = None,
     top_k_bm25: int | None = None,
     top_k_vector: int | None = None,
     top_k_rerank: int | None = None,
+    knowledge_mode: str = "hybrid",
 ) -> list[dict]:
     """
     Full hybrid retrieval pipeline:
@@ -59,12 +69,16 @@ def hybrid_retrieve(
       3. RRF fusion
       4. BGE Reranker → final top_k chunks
 
+    Knowledge Source Mode filtering happens BEFORE fusion and reranking so
+    only chunks from the selected source type enter the pipeline.
+
     Args:
         query: Original user query
         queries: Optional list of rewritten queries from query_rewriter
         top_k_bm25: BM25 candidates per query (default: settings.bm25_top_k)
         top_k_vector: Vector candidates per query (default: settings.vector_top_k)
         top_k_rerank: Final chunks after reranking (default: settings.reranker_top_k)
+        knowledge_mode: "hybrid" | "official" | "experience"
 
     Returns:
         Final ranked list of chunk dicts with relevance scores.
@@ -72,6 +86,10 @@ def hybrid_retrieve(
     top_k_bm25 = top_k_bm25 or settings.bm25_top_k
     top_k_vector = top_k_vector or settings.vector_top_k
     top_k_rerank = top_k_rerank or settings.reranker_top_k
+
+    source_filter = _mode_to_source_filter(knowledge_mode)
+    if source_filter:
+        logger.info(f"Retrieval filter: source_type='{source_filter}' (mode={knowledge_mode})")
 
     all_queries = [query] + (queries or [])
     embedder = get_embedder()
@@ -82,14 +100,18 @@ def hybrid_retrieve(
     all_result_lists: list[list[dict]] = []
 
     for q in all_queries:
-        # BM25 results
-        bm25_results = bm25.search(q, top_k=top_k_bm25)
+        # BM25 results — filtered by source_type when mode is not hybrid
+        bm25_results = bm25.search(q, top_k=top_k_bm25, filter_source_type=source_filter)
         if bm25_results:
             all_result_lists.append(bm25_results)
 
-        # Vector results
+        # Vector results — filtered by source_type when mode is not hybrid
         query_embedding = embedder.embed_query(q)
-        vector_results = vectorstore.search(query_embedding, top_k=top_k_vector)
+        vector_results = vectorstore.search(
+            query_embedding,
+            top_k=top_k_vector,
+            filter_source_type=source_filter,
+        )
         if vector_results:
             all_result_lists.append(vector_results)
 

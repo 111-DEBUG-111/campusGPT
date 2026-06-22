@@ -20,6 +20,9 @@ class SourceCitation(BaseModel):
     section_title: Optional[str] = None   # immediate heading (e.g. "2.1 Grading")
     section_path: Optional[str] = None    # breadcrumb (e.g. "Academics > 2.1 Grading")
     chunk_type: Optional[str] = None      # "text" | "table" | "heading_intro"
+    # Knowledge Source Modes metadata — added v2.0
+    source_type: Optional[str] = None     # "official" | "experience"
+    author: Optional[str] = None          # e.g. "Divyansh Rathore" (experience only)
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -27,6 +30,11 @@ class SourceCitation(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     conversation_id: Optional[int] = None
+    # Knowledge Source Mode — persisted per conversation.
+    # If omitted, the server reads the conversation's stored mode.
+    knowledge_mode: Optional[str] = Field(
+        None, pattern="^(hybrid|official|experience)$"
+    )
 
 
 class ChatResponse(BaseModel):
@@ -35,6 +43,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceCitation]
     query_time_ms: float
+    knowledge_mode: str = "hybrid"  # echo back the mode used
 
 
 class MessageOut(BaseModel):
@@ -53,6 +62,7 @@ class ConversationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[MessageOut] = []
+    knowledge_mode: str = "hybrid"  # returned so the frontend can restore the selector
 
     model_config = {"from_attributes": True}
 
@@ -78,6 +88,9 @@ class DocumentOut(BaseModel):
     chunk_count: int
     status: str
     file_size_bytes: int
+    # Knowledge Source Modes — added v2.0
+    source_type: str = "official"
+    author: Optional[str] = None
     uploaded_at: datetime
     indexed_at: Optional[datetime] = None
 
@@ -87,6 +100,13 @@ class DocumentOut(BaseModel):
 class DocumentListResponse(BaseModel):
     documents: list[DocumentOut]
     total: int
+
+
+class DocumentUpdate(BaseModel):
+    """Payload for PATCH /api/admin/documents/{id}"""
+    source_type: Optional[str] = Field(None, pattern="^(official|experience)$")
+    author: Optional[str] = Field(None, max_length=255)
+    category: Optional[str] = None
 
 
 # ─── Feedback ─────────────────────────────────────────────────────────────────

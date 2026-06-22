@@ -5,6 +5,7 @@ import type {
   ConversationListItem,
   PendingConversation,
   PendingConversationStatus,
+  KnowledgeMode,
 } from '../types';
 import { chatApi } from '../api/chat';
 
@@ -114,14 +115,16 @@ interface ChatState {
   /**
    * Per-conversation optimistic user messages, keyed by conversation ID.
    * Uses NEW_CONV_KEY (0) for the "new chat" pane (activeConversationId === null).
-   * This lets the typing bubble survive conversation switches:
-   *   - Chat A sends Q, user switches to B → pendingMessages[A.id] is still set
-   *   - User returns to A → sees Q + typing indicator immediately
    */
   pendingMessages: Record<number, string>;
 
   // Completion toast notification
   completionToast: CompletionToast | null;
+
+  // Knowledge Source Mode — session-level default, persisted.
+  // New conversations inherit whatever the user last selected.
+  // When switching to a saved conversation its stored mode is restored.
+  knowledgeMode: KnowledgeMode;
 
   // Actions
   setInput: (input: string) => void;
@@ -135,11 +138,11 @@ interface ChatState {
   submitFeedback: (messageId: number, rating: 'helpful' | 'not_helpful') => Promise<void>;
   clearError: () => void;
   dismissToast: () => void;
+  setKnowledgeMode: (mode: KnowledgeMode) => void;
 
-  // Internal helpers (kept in state so sidebar can read pendingConversations reactively)
+  // Internal helpers
   _updatePendingStatus: (tempId: number, status: PendingConversationStatus, error?: string) => void;
   _removePending: (tempId: number) => void;
-  /** Remove the in-flight record for a given conversation key. */
   _clearPendingMessage: (convKey: number) => void;
 }
 
@@ -161,6 +164,9 @@ export const useChatStore = create<ChatState>()(
       input: '',
       pendingMessages: {},
       completionToast: null,
+      knowledgeMode: 'hybrid',
+
+      setKnowledgeMode: (mode) => set({ knowledgeMode: mode }),
 
       setInput: (input) => set({ input }),
 
@@ -190,9 +196,10 @@ export const useChatStore = create<ChatState>()(
             activeConversation: cached,
             isLoading: false,
             error: null,
+            // Restore the conversation's stored knowledge mode
+            knowledgeMode: (cached.knowledge_mode as KnowledgeMode) ?? get().knowledgeMode,
           });
 
-          // Background refresh only if the TTL has expired
           if (isCacheStale(id)) {
             set({ isBackgroundRefreshing: true });
             get()
@@ -244,7 +251,11 @@ export const useChatStore = create<ChatState>()(
           setCached(id, conversation);
           // Only surface to UI if this is still the active chat
           if (get().activeConversationId === id) {
-            set({ activeConversation: conversation });
+            set({
+              activeConversation: conversation,
+              // Restore the knowledge mode stored on this conversation
+              knowledgeMode: (conversation.knowledge_mode as KnowledgeMode) ?? get().knowledgeMode,
+            });
           }
         } catch (error) {
           if (get().activeConversationId === id) {
@@ -322,7 +333,11 @@ export const useChatStore = create<ChatState>()(
         }
 
         try {
-          const response = await chatApi.sendMessage(query, activeConversationId || undefined);
+          const response = await chatApi.sendMessage(
+            query,
+            activeConversationId || undefined,
+            get().knowledgeMode,
+          );
 
           if (generatingTimer !== null) clearTimeout(generatingTimer);
 
@@ -463,14 +478,15 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'campusgpt-chat',
-      // Persist the sidebar list + its fetch timestamp so the sidebar renders
-      // immediately on page load without waiting for the first API response.
+      // Persist the sidebar list + its fetch timestamp + knowledgeMode so the
+      // sidebar renders immediately on load and mode selection survives refresh.
       // pendingMessages is intentionally excluded — in-flight requests don't
       // survive a page reload.
       partialize: (state) => ({
         activeConversationId: state.activeConversationId,
         conversations: state.conversations,
         lastConversationsFetch: state.lastConversationsFetch,
+        knowledgeMode: state.knowledgeMode,
       }),
     }
   )
