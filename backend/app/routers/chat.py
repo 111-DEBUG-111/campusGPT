@@ -19,7 +19,8 @@ from app.schemas import (
     ChatRequest, ChatResponse, ConversationOut,
     ConversationListItem, MessageOut, SourceCitation
 )
-from app.rag.pipeline import run_rag_pipeline, RagPipelineError
+from app.rag.pipeline import run_rag_pipeline
+from app.rag.errors import RagPipelineError
 from app.rag.outcome_classifier import classify_query_outcome
 from app.services.analytics_service import log_event
 from app.services.knowledge_gap_service import record_knowledge_gap
@@ -199,6 +200,7 @@ async def chat(
         await db.commit()
         await db.refresh(assistant_message)
 
+        model_used = cached.get("model_used", "gemini")
         await log_event(
             db=db,
             event_type="query",
@@ -208,6 +210,7 @@ async def chat(
             retrieved_chunks=cached.get("retrieved_chunks", 0),
             cache_hit=True,
             kb_version=kb_version,
+            model_used=model_used,
         )
 
         _schedule_outcome_classification(
@@ -225,6 +228,7 @@ async def chat(
             sources=sources,
             query_time_ms=cache_lookup_ms,
             knowledge_mode=effective_mode,
+            model_used=model_used,
         )
 
     # ── Cache MISS — run the full RAG pipeline ───────────────────────────────────
@@ -265,6 +269,7 @@ async def chat(
         retrieved_chunks=result["retrieved_chunks"],
         cache_hit=False,
         kb_version=kb_version,
+        model_used=result.get("model_used", "gemini"),
     )
 
     _schedule_outcome_classification(
@@ -282,6 +287,7 @@ async def chat(
         sources=result["sources"],
         query_time_ms=result["query_time_ms"],
         knowledge_mode=effective_mode,
+        model_used=result.get("model_used", "gemini"),
     )
 
 

@@ -44,6 +44,7 @@ class ChatResponse(BaseModel):
     sources: list[SourceCitation]
     query_time_ms: float
     knowledge_mode: str = "hybrid"  # echo back the mode used
+    model_used: str = "gemini"      # model that generated the response
 
 
 class MessageOut(BaseModel):

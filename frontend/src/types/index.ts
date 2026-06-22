@@ -71,6 +71,7 @@ export interface ChatResponse {
   sources: SourceCitation[];
   query_time_ms: number;
   knowledge_mode?: KnowledgeMode;
+  model_used?: string;
 }
 
 // Document types

@@ -1,13 +1,12 @@
 """
-Query Rewriter — Uses Gemini to expand the user's query into multiple variants.
+Query Rewriter — Uses the LLM Orchestrator (Gemini + Groq fallback) to expand
+the user's query into multiple variants.
 
 This improves recall by searching with diverse phrasings of the same question.
 """
 import json
 import logging
 import re
-
-from google.genai import types
 
 from app.config import get_settings
 
@@ -86,31 +85,19 @@ def rewrite_query(query: str, n: int | None = None) -> list[str]:
         List of alternative query strings (empty list on any failure —
         the retriever falls back gracefully to the original query).
     """
-    # Import here to avoid a circular import at module level
-    # (pipeline imports rewrite_query; rewrite_query now imports get_gemini_client).
-    from app.rag.pipeline import get_gemini_client, generate_content_with_retry
+    # Import here to avoid circular imports
+    from app.services.llm_service import llm_orchestrator
 
     n = n or settings.max_query_rewrites
 
     try:
-        client = get_gemini_client()
-        response = generate_content_with_retry(
-            client=client,
-            model=settings.gemini_model,
-            contents=REWRITE_PROMPT.format(query=query, n=n),
-            config=types.GenerateContentConfig(
-                temperature=0.3,
-                # Higher token budget so thinking-mode models don't truncate
-                # mid-string. 3 rewrites × ~20 words ≈ 120 tokens; give 4×
-                # headroom for thinking overhead.
-                max_output_tokens=1024,
-                # Force the model to output raw JSON — no prose, no fences
-                response_mime_type="application/json",
-            ),
+        raw_response, model_used = llm_orchestrator.generate_with_fallback(
+            prompt=REWRITE_PROMPT.format(query=query, n=n),
+            temperature=0.3,
+            max_tokens=1024,
+            response_mime_type="application/json",
         )
-
-        raw = response.text.strip()
-        rewrites = _extract_json_array(raw)
+        rewrites = _extract_json_array(raw_response)
 
         if rewrites:
             result = [r for r in rewrites[:n] if isinstance(r, str) and r.strip()]
@@ -118,7 +105,7 @@ def rewrite_query(query: str, n: int | None = None) -> list[str]:
             return result
 
         # Extraction failed — log raw response at DEBUG for debugging
-        logger.debug(f"Could not extract JSON array from rewriter response: {raw!r}")
+        logger.debug(f"Could not extract JSON array from rewriter response: {raw_response!r}")
 
     except Exception as e:
         # Non-fatal: the retriever continues with the original query

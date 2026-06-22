@@ -5,7 +5,6 @@ Run with:
     cd backend
     .venv/bin/python -m pytest tests/test_chunker.py -v
 """
-import pytest
 from app.rag.chunker import (
     SemanticChunker,
     HeadingMatch,

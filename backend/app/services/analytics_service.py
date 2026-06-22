@@ -55,6 +55,7 @@ async def log_event(
     retrieved_chunks: int | None = None,
     cache_hit: bool | None = None,
     kb_version: int | None = None,
+    model_used: str | None = None,
 ) -> None:
     """Log an analytics event.
 
@@ -75,6 +76,7 @@ async def log_event(
         retrieved_chunks=retrieved_chunks,
         cache_hit=cache_hit,
         kb_version=kb_version,
+        model_used=model_used,
     )
     db.add(event)
     await db.commit()

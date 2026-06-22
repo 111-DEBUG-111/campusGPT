@@ -5,12 +5,12 @@ Classifies each query/answer pair as:
   - answered       — substantive university answer provided
   - knowledge_gap  — on-topic but KB lacked enough specific information
   - off_topic      — not about university/campus life
+
+Uses the LLMOrchestrator so Gemini → Groq fallback applies here too.
 """
 import json
 import logging
 import re
-
-from google.genai import types
 
 from app.config import get_settings
 
@@ -143,30 +143,10 @@ def _extract_outcome(text: str) -> str | None:
     return None
 
 
-def _response_text(response) -> str:
-    """Extract text from a Gemini response (handles thinking-model part layouts)."""
-    text = getattr(response, "text", None) or ""
-    if text.strip():
-        return text.strip()
-
-    try:
-        for candidate in response.candidates or []:
-            content = getattr(candidate, "content", None)
-            if not content:
-                continue
-            for part in content.parts or []:
-                part_text = getattr(part, "text", None)
-                if part_text and part_text.strip():
-                    return part_text.strip()
-    except Exception:
-        pass
-
-    return ""
-
-
 def classify_query_outcome(query: str, answer: str, retrieved_chunks: int) -> str:
     """
-    Classify a chat outcome using heuristics first, then Gemini.
+    Classify a chat outcome using heuristics first, then the LLM orchestrator
+    (Gemini with automatic Groq fallback).
 
     Returns one of: "answered", "knowledge_gap", "off_topic".
     Defaults to "answered" on any failure (fail-safe).
@@ -180,32 +160,31 @@ def classify_query_outcome(query: str, answer: str, retrieved_chunks: int) -> st
         )
         return heuristic
 
-    from app.rag.pipeline import get_gemini_client, generate_content_with_retry
+    # Import here to avoid circular imports at module level
+    from app.services.llm_service import llm_orchestrator
 
     query_snip = query[:500]
     answer_snip = answer[:1500]
 
     try:
-        client = get_gemini_client()
-        response = generate_content_with_retry(
-            client=client,
-            model=settings.gemini_model,
-            contents=_CLASSIFY_PROMPT.format(
+        raw, model_used = llm_orchestrator.generate_with_fallback(
+            prompt=_CLASSIFY_PROMPT.format(
                 query=query_snip.replace('"', "'"),
                 answer=answer_snip.replace('"', "'"),
                 retrieved_chunks=retrieved_chunks,
             ),
-            config=types.GenerateContentConfig(
-                temperature=0.0,
-                # Thinking models (e.g. gemini-2.5-flash) need headroom beyond the JSON body.
-                max_output_tokens=512,
-                response_mime_type="application/json",
-            ),
+            temperature=0.0,
+            max_tokens=256,
+            response_mime_type="application/json",
         )
-        raw = _response_text(response)
         outcome = _extract_outcome(raw)
         if outcome:
-            logger.info("Outcome classified via LLM as %s for query: %s...", outcome, query[:60])
+            logger.info(
+                "Outcome classified via LLM (%s) as %s for query: %s...",
+                model_used,
+                outcome,
+                query[:60],
+            )
             return outcome
         logger.warning("Could not parse outcome from classifier response: %r", raw[:200])
     except Exception as e:

@@ -114,6 +114,8 @@ class AnalyticsEvent(Base):
     # Cache tracking (added v1.3)
     cache_hit: Mapped[bool | None] = mapped_column(nullable=True)
     kb_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # LLM fallback model tracking (added v2.3)
+    model_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 # --- Visitor Session ----------------------------------------------------------
