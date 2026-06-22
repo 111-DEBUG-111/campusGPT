@@ -105,6 +105,16 @@ export interface AnalyticsSummary {
   questions_by_day: { date: string; count: number }[];
 }
 
+export interface KnowledgeGap {
+  id: number;
+  query: string;
+  count: number;
+  knowledge_mode: string;
+  last_answer_snippet: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
 export const DOCUMENT_CATEGORIES = [
   'general',
   'academics',

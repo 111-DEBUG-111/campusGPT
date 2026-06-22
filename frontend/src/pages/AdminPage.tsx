@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
   GraduationCap, Upload, FileText, BarChart2,
-  ArrowLeft, RefreshCw, Loader2, AlertCircle, CheckCircle
+  ArrowLeft, RefreshCw, Loader2, AlertCircle, CheckCircle, HelpCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DocumentUpload } from '../components/admin/DocumentUpload';
 import { DocumentList } from '../components/admin/DocumentList';
 import { AnalyticsDashboard } from '../components/admin/AnalyticsDashboard';
+import { KnowledgeGapsList } from '../components/admin/KnowledgeGapsList';
 import { useAdminStore } from '../stores/adminStore';
 
-type Tab = 'upload' | 'documents' | 'analytics';
+type Tab = 'upload' | 'documents' | 'gaps' | 'analytics';
 
 const AdminPage: React.FC = () => {
   const navigate = useNavigate();
@@ -17,7 +18,10 @@ const AdminPage: React.FC = () => {
   const {
     loadDocuments,
     loadAnalytics,
+    loadKnowledgeGaps,
     analytics,
+    knowledgeGaps,
+    isLoading,
     error,
     successMessage,
     clearMessages,
@@ -29,7 +33,7 @@ const AdminPage: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        await Promise.all([loadDocuments(), loadAnalytics()]);
+        await Promise.all([loadDocuments(), loadAnalytics(), loadKnowledgeGaps()]);
       } catch (err: any) {
         if (err?.message?.includes('401') || err?.message?.toLowerCase().includes('session')) {
           navigate('/admin/login');
@@ -49,6 +53,7 @@ const AdminPage: React.FC = () => {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'documents', label: 'Documents', icon: <FileText size={15} /> },
     { id: 'upload', label: 'Upload', icon: <Upload size={15} /> },
+    { id: 'gaps', label: 'Knowledge Gaps', icon: <HelpCircle size={15} /> },
     { id: 'analytics', label: 'Analytics', icon: <BarChart2 size={15} /> },
   ];
 
@@ -72,7 +77,7 @@ const AdminPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             className="btn btn-secondary text-xs"
-            onClick={() => { loadDocuments(); loadAnalytics(); }}
+            onClick={() => { loadDocuments(); loadAnalytics(); loadKnowledgeGaps(); }}
             aria-label="Refresh data"
           >
             <RefreshCw size={12} />
@@ -104,7 +109,12 @@ const AdminPage: React.FC = () => {
             key={tab.id}
             id={`admin-tab-${tab.id}`}
             className={`admin-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id);
+              if (tab.id === 'gaps') {
+                loadKnowledgeGaps();
+              }
+            }}
           >
             {tab.icon}
             {tab.label}
@@ -122,6 +132,14 @@ const AdminPage: React.FC = () => {
 
         {activeTab === 'documents' && (
           <DocumentList />
+        )}
+
+        {activeTab === 'gaps' && (
+          <KnowledgeGapsList
+            gaps={knowledgeGaps}
+            isLoading={isLoading && knowledgeGaps.length === 0}
+            onUploadClick={() => setActiveTab('upload')}
+          />
         )}
 
         {activeTab === 'analytics' && (

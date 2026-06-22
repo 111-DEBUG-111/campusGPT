@@ -144,6 +144,18 @@ class AnalyticsSummary(BaseModel):
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
 
+class KnowledgeGapOut(BaseModel):
+    id: int
+    query: str
+    count: int
+    knowledge_mode: str
+    last_answer_snippet: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ReindexResponse(BaseModel):
     message: str
     documents_reindexed: int

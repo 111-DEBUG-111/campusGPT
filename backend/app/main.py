@@ -40,7 +40,7 @@ from app.cache.client import ping_redis
 from app.cache.kb_version import get_kb_version
 
 # Import all routers
-from app.routers import chat, documents, feedback, analytics, health, admin_auth, visits
+from app.routers import chat, documents, feedback, analytics, health, admin_auth, visits, knowledge_gaps
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -154,6 +154,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router)
     app.include_router(analytics.router)
     app.include_router(visits.router)
+    app.include_router(knowledge_gaps.router)
 
     return app
 

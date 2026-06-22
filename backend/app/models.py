@@ -127,6 +127,22 @@ class VisitorSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+# --- Knowledge Gap ------------------------------------------------------------
+
+class KnowledgeGap(Base):
+    """University questions the KB could not fully answer (aggregated by normalized query)."""
+    __tablename__ = "knowledge_gaps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    query: Mapped[str] = mapped_column(Text)
+    query_normalized: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    knowledge_mode: Mapped[str] = mapped_column(String(20), default="hybrid")
+    last_answer_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 # NOTE: document_chunks table is managed via raw DDL in database.py
 # (see _apply_migrations). It uses the pgvector `vector` column type which
 # requires the extension to be enabled first — handled there.

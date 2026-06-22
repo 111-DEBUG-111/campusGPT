@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { Document, AnalyticsSummary } from '../types';
+import type { Document, AnalyticsSummary, KnowledgeGap } from '../types';
 import type { DocumentSourceType } from '../types';
 
 interface DocumentListResponse {
@@ -69,6 +69,11 @@ export const adminApi = {
 
   getAnalytics: async (): Promise<AnalyticsSummary> => {
     const { data } = await apiClient.get('/api/admin/analytics');
+    return data;
+  },
+
+  getKnowledgeGaps: async (): Promise<KnowledgeGap[]> => {
+    const { data } = await apiClient.get('/api/admin/knowledge-gaps');
     return data;
   },
 };
