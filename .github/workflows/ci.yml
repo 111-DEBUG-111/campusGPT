@@ -60,6 +60,7 @@ jobs:
             "slowapi>=0.1.9" \
             redis \
             nltk \
+            google-genai \
             httpx \
             psutil \
             pytest \
