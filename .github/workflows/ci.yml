@@ -1,0 +1,121 @@
+name: CI
+
+# Run on every push and every pull-request targeting any branch.
+# This ensures PRs are checked before merge and direct pushes to main
+# are also validated (Render deploys from main on every push).
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+# Cancel an in-progress run for the same ref when a newer commit is pushed.
+# Avoids wasting runner minutes on stale commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Backend: lint + unit tests ──────────────────────────────────────────────
+  backend:
+    name: Backend Tests (Python 3.11)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # uv is dramatically faster than plain pip for installing packages.
+      # It resolves + installs the full dependency tree in seconds rather than minutes.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Install only the packages the unit tests actually need.
+      # We deliberately skip FlagEmbedding and sentence-transformers (~1.5 GB of
+      # model weights + PyTorch) because both test files mock all network / model
+      # calls.  This keeps CI under 60 seconds instead of 10+ minutes.
+      - name: Install test dependencies
+        run: |
+          uv pip install --system \
+            fastapi \
+            pydantic \
+            "pydantic-settings>=2.3.0" \
+            sqlalchemy \
+            asyncpg \
+            aiosqlite \
+            python-dotenv \
+            "rank-bm25>=0.2.2" \
+            "upstash-redis>=1.1.0" \
+            "slowapi>=0.1.9" \
+            redis \
+            nltk \
+            httpx \
+            psutil \
+            pytest \
+            pytest-asyncio
+
+      # The tests import app modules which read Settings from the environment.
+      # We supply safe dummy values so pydantic-settings doesn't abort with a
+      # ValidationError before a single test runs.  No real service is ever
+      # contacted — all external calls are mocked inside the test files.
+      #
+      # IMPORTANT: CACHE_ENABLED is intentionally NOT set here.
+      # The default in Settings is True, which is what the cache tests expect.
+      # Tests that need caching disabled patch `app.cache.response_cache.settings`
+      # directly (e.g. test_set_skipped_when_cache_disabled).  Setting
+      # CACHE_ENABLED=false here would poison the @lru_cache Settings singleton
+      # for the entire test session and break tests that expect cache=enabled.
+      - name: Run backend unit tests
+        env:
+          GEMINI_API_KEY: "ci-dummy-key"
+          DATABASE_URL: "postgresql+asyncpg://user:pass@localhost/testdb"
+          STORAGE_ENDPOINT_URL: "https://dummy.supabase.co/storage/v1/s3"
+          STORAGE_ACCESS_KEY_ID: "dummy-access-key"
+          STORAGE_SECRET_ACCESS_KEY: "dummy-secret-key"
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+
+  # ─── Frontend: TypeScript check + production build ───────────────────────────
+  frontend:
+    name: Frontend Build (Node 20)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci installs exact versions from package-lock.json (reproducible).
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm run build` runs `tsc -b && vite build`, so TypeScript type errors
+      # fail this step before the bundle is even attempted.
+      # The frontend's .env is not committed; we supply the one required var so
+      # Vite doesn't error on a missing VITE_API_BASE_URL reference at build time.
+      - name: TypeScript check + production build
+        env:
+          VITE_API_BASE_URL: "https://ci-placeholder.example.com"
+        run: npm run build

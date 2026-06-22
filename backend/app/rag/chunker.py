@@ -302,7 +302,13 @@ class SemanticChunker:
                 for i, (chunk_text, overlap_prepend) in enumerate(text_chunks):
                     full_text = self._prefix_section(chunk_text, node, ancestors)
                     tok = approx_tokens(full_text)
-                    if tok < self.chunk_min_tokens:
+                    # Apply a noise floor of max(chunk_min_tokens // 2, 5) rather
+                    # than the full chunk_min_tokens.  This prevents real sentences
+                    # that are just below the threshold from being silently dropped
+                    # when they are the only content produced for a document.
+                    # Truly tiny fragments (stray words, separators) are still discarded.
+                    noise_floor = max(self.chunk_min_tokens // 2, 5)
+                    if tok < noise_floor:
                         continue
                     chunk_type = "heading_intro" if (i == 0 and node.level > 0) else "text"
                     all_chunks.append(ChunkDict(
@@ -318,6 +324,7 @@ class SemanticChunker:
                         heading_level=node.level if node.level > 0 else None,
                     ))
                     chunk_index += 1
+
 
             # Recurse into children
             for child in node.children:

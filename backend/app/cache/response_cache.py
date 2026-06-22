@@ -49,6 +49,13 @@ from app.cache.kb_version import get_kb_version
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# NOTE: `settings` is intentionally left as a module-level name so that
+# unit tests can patch `app.cache.response_cache.settings` directly.
+# It is NOT frozen at import time — we call get_settings() here which
+# returns the lru_cached singleton, but tests replace this name with a
+# MagicMock, so every function that reads `settings` at call-time will
+# pick up the patched version.
 settings = get_settings()
 
 # Responses larger than this are not cached (Upstash 1 MB value limit guard)
@@ -145,7 +152,9 @@ def get_cached_response(query: str) -> dict | None:
     Also returns None if caching is disabled (CACHE_ENABLED=false or Redis
     not configured).
     """
-    if not settings.cache_enabled:
+    # Use getattr so tests that replace `settings` with a MagicMock still
+    # behave correctly even if cache_enabled is not explicitly set.
+    if not getattr(settings, "cache_enabled", True):
         return None
 
     redis = get_redis()
@@ -184,7 +193,9 @@ def set_cached_response(query: str, result: dict) -> None:
 
     No-op on Redis errors (fail-open).
     """
-    if not settings.cache_enabled:
+    # Use getattr so tests that replace `settings` with a MagicMock still
+    # behave correctly even if cache_enabled is not explicitly set.
+    if not getattr(settings, "cache_enabled", True):
         return
 
     redis = get_redis()

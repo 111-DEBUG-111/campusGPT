@@ -7,17 +7,12 @@ import json
 import logging
 import re
 
-import google.generativeai as genai
+from google.genai import types
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-
-def _get_client() -> genai.GenerativeModel:
-    genai.configure(api_key=settings.gemini_api_key)
-    return genai.GenerativeModel(settings.gemini_model)
 
 
 REWRITE_PROMPT = """\
@@ -91,13 +86,18 @@ def rewrite_query(query: str, n: int | None = None) -> list[str]:
         List of alternative query strings (empty list on any failure —
         the retriever falls back gracefully to the original query).
     """
+    # Import here to avoid a circular import at module level
+    # (pipeline imports rewrite_query; rewrite_query now imports get_gemini_client).
+    from app.rag.pipeline import get_gemini_client
+
     n = n or settings.max_query_rewrites
 
     try:
-        model = _get_client()
-        response = model.generate_content(
-            REWRITE_PROMPT.format(query=query, n=n),
-            generation_config=genai.GenerationConfig(
+        client = get_gemini_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=REWRITE_PROMPT.format(query=query, n=n),
+            config=types.GenerateContentConfig(
                 temperature=0.3,
                 # Higher token budget so thinking-mode models don't truncate
                 # mid-string. 3 rewrites × ~20 words ≈ 120 tokens; give 4×
