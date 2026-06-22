@@ -12,6 +12,16 @@ export interface PendingConversation {
   error?: string;
 }
 
+export type RAGStageKey = 'Rewriting Query' | 'Retrieving Documents' | 'Reranking Results' | 'Generating Response' | 'Complete';
+export type ProgressStatus = 'in_progress' | 'completed' | 'failed';
+
+export interface ProgressState {
+  request_id: string | null;
+  stage: RAGStageKey;
+  status: ProgressStatus;
+  error_message: string | null;
+}
+
 // ── Knowledge Source Modes ──────────────────────────────────────────────────
 
 /** Three retrieval modes for Knowledge Source selection. */

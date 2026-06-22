@@ -35,6 +35,7 @@ class ChatRequest(BaseModel):
     knowledge_mode: Optional[str] = Field(
         None, pattern="^(hybrid|official|experience)$"
     )
+    request_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

@@ -20,6 +20,17 @@ settings = get_settings()
 # ─── Structured pipeline error ─────────────────────────────────────────────────
 from app.rag.errors import RagPipelineError
 from app.services.llm_service import llm_orchestrator
+from app.services.progress_service import (
+    update_progress,
+    STAGE_REWRITING,
+    STAGE_RETRIEVING,
+    STAGE_RERANKING,
+    STAGE_GENERATING,
+    STAGE_COMPLETE,
+    STATUS_IN_PROGRESS,
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+)
 
 
 
@@ -252,6 +263,9 @@ def run_rag_pipeline(
     query: str,
     conversation_history: list[dict] | None = None,
     knowledge_mode: str = "hybrid",
+    conversation_id: int | None = None,
+    session_id: str | None = None,
+    request_id: str | None = None,
 ) -> dict:
     """
     Full RAG pipeline.
@@ -260,6 +274,9 @@ def run_rag_pipeline(
         query: User's question
         conversation_history: List of {"role": str, "content": str} dicts
         knowledge_mode: "hybrid" | "official" | "experience"
+        conversation_id: ID of the conversation
+        session_id: session token of the user
+        request_id: Client-side generated request UUID
 
     Returns:
         {
@@ -273,25 +290,59 @@ def run_rag_pipeline(
     start_time = time.time()
     history = conversation_history or []
 
+    def emit_stage(stage: str, status: str, error_message: str | None = None):
+        if conversation_id is not None and session_id is not None:
+            update_progress(
+                conversation_id=conversation_id,
+                session_id=session_id,
+                request_id=request_id,
+                stage=stage,
+                status=status,
+                error_message=error_message,
+            )
+
     # ── Step 1: Query Rewriting ────────────────────────────────────────────────
     logger.info(f"RAG pipeline started for query: {query[:80]}... (mode={knowledge_mode})")
-    rewritten_queries = rewrite_query(query)
-    logger.info(f"Query rewrites: {rewritten_queries}")
+    emit_stage(STAGE_REWRITING, STATUS_IN_PROGRESS)
+    try:
+        rewritten_queries = rewrite_query(query)
+        logger.info(f"Query rewrites: {rewritten_queries}")
+    except Exception as e:
+        logger.error(f"RAG pipeline failed during query rewriting: {e}")
+        emit_stage(STAGE_REWRITING, STATUS_FAILED, "Failed during retrieval")
+        raise
 
-    # ── Step 2: Hybrid Retrieval (mode-filtered) ───────────────────────────────
-    chunks = hybrid_retrieve(
-        query=query,
-        queries=rewritten_queries,
-        top_k_rerank=settings.max_context_chunks,
-        knowledge_mode=knowledge_mode,
-    )
-    logger.info(f"Retrieved {len(chunks)} final chunks after reranking (mode={knowledge_mode})")
+    # ── Step 2: Hybrid Retrieval (mode-filtered) & Step 3: Reranking ───────────
+    emit_stage(STAGE_RETRIEVING, STATUS_IN_PROGRESS)
+    state_tracker = {"active_stage": STAGE_RETRIEVING}
 
-    # ── Step 3: Context Assembly ───────────────────────────────────────────────
+    def on_rerank_start():
+        state_tracker["active_stage"] = STAGE_RERANKING
+        emit_stage(STAGE_RERANKING, STATUS_IN_PROGRESS)
+
+    try:
+        chunks = hybrid_retrieve(
+            query=query,
+            queries=rewritten_queries,
+            top_k_rerank=settings.max_context_chunks,
+            knowledge_mode=knowledge_mode,
+            on_rerank_start=on_rerank_start,
+        )
+        logger.info(f"Retrieved {len(chunks)} final chunks after reranking (mode={knowledge_mode})")
+    except Exception as e:
+        logger.error(f"RAG pipeline failed during retrieval/reranking: {e}")
+        if state_tracker["active_stage"] == STAGE_RERANKING:
+            emit_stage(STAGE_RERANKING, STATUS_FAILED, "Failed during reranking")
+        else:
+            emit_stage(STAGE_RETRIEVING, STATUS_FAILED, "Failed during retrieval")
+        raise
+
+    # ── Step 4: Context Assembly & generating answer ───────────────────────────
+    emit_stage(STAGE_GENERATING, STATUS_IN_PROGRESS)
     context = format_context(chunks)
     history_text = format_history(history)
 
-    # ── Step 4: Fallback LLM Response (mode-aware prompt) ──────────────────────
+    # ── Fallback LLM Response (mode-aware prompt) ──────────────────────
     system_prompt = _get_system_prompt(knowledge_mode)
     prompt = system_prompt.format(context=context, history=history_text)
     full_prompt = prompt + f"\n\nStudent question: {query}"
@@ -303,6 +354,7 @@ def run_rag_pipeline(
             max_tokens=2048,
         )
     except Exception as e:
+        emit_stage(STAGE_GENERATING, STATUS_FAILED, "Failed during generation")
         if isinstance(e, RagPipelineError):
             raise e
         logger.error(f"LLM generation failed: {e}")
@@ -313,6 +365,8 @@ def run_rag_pipeline(
 
     elapsed_ms = (time.time() - start_time) * 1000
     logger.info(f"RAG pipeline completed in {elapsed_ms:.0f}ms")
+
+    emit_stage(STAGE_COMPLETE, STATUS_COMPLETED)
 
     return {
         "answer": answer,

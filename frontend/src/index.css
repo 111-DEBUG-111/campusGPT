@@ -1062,3 +1062,87 @@ body {
   animation: fadeIn 0.2s ease-out;
   letter-spacing: 0.02em;
 }
+
+/* ─── RAG Progress Panel ─────────────────────────────────────────────────── */
+.rag-progress-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background-color: #111318;
+  border: 1px solid #1f2330;
+  width: fit-content;
+  min-width: 290px;
+  max-width: 100%;
+  border-bottom-left-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  margin-top: 4px;
+  animation: slide-up 0.25s ease-out;
+}
+
+.rag-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.rag-stage-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+}
+
+.rag-stage-label {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.rag-stage-error-text {
+  font-size: 11px;
+  color: #fca5a5;
+  margin-left: auto;
+  font-weight: 500;
+  padding-left: 8px;
+}
+
+/* Row states */
+.rag-stage-pending {
+  opacity: 0.45;
+}
+
+.rag-stage-completed .rag-stage-label {
+  color: #e2e8f0;
+}
+
+.rag-stage-active .rag-stage-label {
+  color: #818cf8;
+  font-weight: 600;
+}
+
+.rag-stage-failed .rag-stage-label {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+/* Icon classes */
+.rag-icon-completed {
+  color: #10b981;
+}
+
+.rag-icon-failed {
+  color: #ef4444;
+}
+
+.rag-icon-active {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.rag-icon-pending {
+  filter: grayscale(1);
+}

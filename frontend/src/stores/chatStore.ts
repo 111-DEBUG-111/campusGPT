@@ -6,6 +6,7 @@ import type {
   PendingConversation,
   PendingConversationStatus,
   KnowledgeMode,
+  ProgressState,
 } from '../types';
 import { chatApi } from '../api/chat';
 
@@ -67,6 +68,46 @@ function evictCached(id: number): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RAG Progress Polling State & Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+function startPolling(set: any) {
+  if (pollInterval) return;
+  console.log("[RAG Progress] startPolling started");
+  pollInterval = setInterval(async () => {
+    try {
+      const activeProgress = await chatApi.getActiveProgress();
+      console.log("[RAG Progress] Polled progress:", activeProgress);
+      set({ progress: activeProgress });
+    } catch (error) {
+      console.error('[RAG Progress] Failed to poll progress:', error);
+    }
+  }, 500);
+}
+
+function getActivePendingCount(get: any): number {
+  const { pendingMessages, pendingRequests, progress } = get();
+  let count = 0;
+  for (const [convKey, reqId] of Object.entries(pendingRequests)) {
+    if (pendingMessages[Number(convKey)]) {
+      const prog = progress[reqId as string];
+      if (!prog || prog.status === 'in_progress') {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+function stopPolling(get: any) {
+  if (getActivePendingCount(get) === 0 && pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Auto-decrementing counter for temporary IDs (never clashes with positive DB IDs)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -117,6 +158,8 @@ interface ChatState {
    * Uses NEW_CONV_KEY (0) for the "new chat" pane (activeConversationId === null).
    */
   pendingMessages: Record<number, string>;
+  pendingRequests: Record<number, string>;
+  progress: Record<string, ProgressState>;
 
   // Completion toast notification
   completionToast: CompletionToast | null;
@@ -144,6 +187,7 @@ interface ChatState {
   _updatePendingStatus: (tempId: number, status: PendingConversationStatus, error?: string) => void;
   _removePending: (tempId: number) => void;
   _clearPendingMessage: (convKey: number) => void;
+  _clearPendingRequest: (convKey: number) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,6 +207,8 @@ export const useChatStore = create<ChatState>()(
       error: null,
       input: '',
       pendingMessages: {},
+      pendingRequests: {},
+      progress: {},
       completionToast: null,
       knowledgeMode: 'hybrid',
 
@@ -316,14 +362,22 @@ export const useChatStore = create<ChatState>()(
           }));
         }
 
-        // Register the optimistic message scoped to this conversation.
+        // Generate client-side request UUID
+        const requestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+        // Register the optimistic message and request UUID scoped to this conversation.
         // It survives conversation switches and is only removed once the
         // backend responds (success) or the request fails.
         set((s) => ({
           pendingMessages: { ...s.pendingMessages, [convKey]: query },
+          pendingRequests: { ...s.pendingRequests, [convKey]: requestId },
           error: null,
           input: '',
         }));
+
+        startPolling(set);
 
         let generatingTimer: ReturnType<typeof setTimeout> | null = null;
         if (tempId !== null) {
@@ -337,6 +391,7 @@ export const useChatStore = create<ChatState>()(
             query,
             activeConversationId || undefined,
             get().knowledgeMode,
+            requestId,
           );
 
           if (generatingTimer !== null) clearTimeout(generatingTimer);
@@ -348,9 +403,16 @@ export const useChatStore = create<ChatState>()(
           // when the user navigates back to this conversation.
           setCached(response.conversation_id, conversation);
 
-          // Remove the optimistic message for this conversation key now that
+          // Remove the optimistic message and request for this conversation key now that
           // the real data has arrived.
           get()._clearPendingMessage(convKey);
+          get()._clearPendingRequest(convKey);
+          set((s) => {
+            const newProgress = { ...s.progress };
+            delete newProgress[requestId];
+            return { progress: newProgress };
+          });
+          stopPolling(get);
 
           // Only push the completed conversation into the active UI if the user
           // is still on the originating conversation (or just returned to it).
@@ -388,10 +450,26 @@ export const useChatStore = create<ChatState>()(
           const message =
             error instanceof Error ? error.message : 'Failed to send message';
 
-          // Clear the optimistic message and restore the query to the input
-          // so the user can retry without retyping.
-          get()._clearPendingMessage(convKey);
-          set({ error: message, input: query });
+          // Determine the failed stage from the last known progress, or default to Generating Response
+          const lastProgress = get().progress[requestId];
+          const failedStage = lastProgress?.stage || 'Generating Response';
+
+          // Set progress to failed locally and preserve optimistic message so they can see the failure.
+          set((s) => ({
+            progress: {
+              ...s.progress,
+              [requestId]: {
+                request_id: requestId,
+                stage: failedStage,
+                status: 'failed',
+                error_message: message,
+              },
+            },
+            error: message,
+            input: query,
+          }));
+
+          stopPolling(get);
 
           if (tempId !== null) {
             get()._updatePendingStatus(tempId, 'failed', message);
@@ -416,23 +494,23 @@ export const useChatStore = create<ChatState>()(
 
           setTimeout(() => get().dismissToast(), 6000);
         }
-        // NOTE: no finally { isLoading = false } needed — isLoading is no longer
-        // used as the typing indicator. The pending bubble is driven purely by
-        // pendingMessages[convKey], which is cleared above.
       },
 
       startNewChat: () => {
         // Also clear any in-flight optimistic message on the new-chat pane.
         set((s) => {
-          const { [NEW_CONV_KEY]: _removed, ...rest } = s.pendingMessages;
+          const { [NEW_CONV_KEY]: _removedMsg, ...restMsg } = s.pendingMessages;
+          const { [NEW_CONV_KEY]: _removedReq, ...restReq } = s.pendingRequests;
           return {
             activeConversationId: null,
             activeConversation: null,
             input: '',
             error: null,
-            pendingMessages: rest,
+            pendingMessages: restMsg,
+            pendingRequests: restReq,
           };
         });
+        stopPolling(get);
       },
 
       deleteConversation: async (id) => {
@@ -444,6 +522,8 @@ export const useChatStore = create<ChatState>()(
         }
         // Also drop any pending message for this conversation
         get()._clearPendingMessage(id);
+        get()._clearPendingRequest(id);
+        stopPolling(get);
         // Force sidebar refresh after delete
         await get().loadConversations(true);
       },
@@ -452,7 +532,33 @@ export const useChatStore = create<ChatState>()(
         await chatApi.submitFeedback(messageId, rating);
       },
 
-      clearError: () => set({ error: null }),
+      clearError: () => {
+        // If there are any failed requests, clear them
+        const { pendingRequests, progress } = get();
+        const newPendingMessages = { ...get().pendingMessages };
+        const newPendingRequests = { ...get().pendingRequests };
+        let changed = false;
+
+        for (const [convKey, reqId] of Object.entries(pendingRequests)) {
+          const prog = progress[reqId];
+          if (prog && prog.status === 'failed') {
+            delete newPendingMessages[Number(convKey)];
+            delete newPendingRequests[Number(convKey)];
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          set({
+            error: null,
+            pendingMessages: newPendingMessages,
+            pendingRequests: newPendingRequests,
+          });
+        } else {
+          set({ error: null });
+        }
+        stopPolling(get);
+      },
       dismissToast: () => set({ completionToast: null }),
 
       _updatePendingStatus: (tempId, status, error) =>
@@ -474,6 +580,13 @@ export const useChatStore = create<ChatState>()(
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { [convKey]: _removed, ...rest } = s.pendingMessages;
           return { pendingMessages: rest };
+        }),
+
+      _clearPendingRequest: (convKey) =>
+        set((s) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { [convKey]: _removed, ...rest } = s.pendingRequests;
+          return { pendingRequests: rest };
         }),
     }),
     {
