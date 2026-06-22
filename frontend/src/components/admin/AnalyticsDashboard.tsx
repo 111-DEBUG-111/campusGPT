@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   MessageSquare, BookOpen, FileText, ThumbsUp,
-  ThumbsDown, Clock, TrendingUp, Hash
+  ThumbsDown, Clock, TrendingUp, Hash, Users
 } from 'lucide-react';
 import type { AnalyticsSummary } from '../../types';
 
@@ -62,6 +62,13 @@ export const AnalyticsDashboard: React.FC<Props> = ({ analytics }) => {
     <div className="space-y-6">
       {/* Stat Cards */}
       <div className="stats-grid">
+        <StatCard
+          icon={<Users size={20} />}
+          label="Unique Visitors"
+          value={analytics.total_unique_visitors.toLocaleString()}
+          iconBg="rgba(236, 72, 153, 0.15)"
+          iconColor="#ec4899"
+        />
         <StatCard
           icon={<MessageSquare size={20} />}
           label="Total Questions"

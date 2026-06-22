@@ -92,6 +92,7 @@ export interface Document {
 
 // Analytics types
 export interface AnalyticsSummary {
+  total_unique_visitors: number;
   total_questions: number;
   total_conversations: number;
   total_documents: number;

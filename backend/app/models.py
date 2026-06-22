@@ -116,6 +116,17 @@ class AnalyticsEvent(Base):
     kb_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
+# --- Visitor Session ----------------------------------------------------------
+
+class VisitorSession(Base):
+    """Tracks unique chat-page visitors by anonymous browser session token."""
+    __tablename__ = "visitor_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 # NOTE: document_chunks table is managed via raw DDL in database.py
 # (see _apply_migrations). It uses the pgvector `vector` column type which
 # requires the extension to be enabled first — handled there.

@@ -129,6 +129,7 @@ class FeedbackResponse(BaseModel):
 # ─── Analytics ────────────────────────────────────────────────────────────────
 
 class AnalyticsSummary(BaseModel):
+    total_unique_visitors: int
     total_questions: int
     total_conversations: int
     total_documents: int
