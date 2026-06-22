@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models import AnalyticsEvent, Message, Feedback, Document, Conversation
+from app.models import AnalyticsEvent, Message, Feedback, Document, Conversation, VisitorSession
 from app.schemas import AnalyticsSummary
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,28 @@ async def log_event(
     await db.commit()
 
 
+async def record_visit(db: AsyncSession, session_id: str) -> None:
+    """Record a chat-page visit for the given anonymous session token."""
+    now = datetime.now(timezone.utc)
+    stmt = (
+        pg_insert(VisitorSession)
+        .values(session_id=session_id, first_seen_at=now, last_seen_at=now)
+        .on_conflict_do_update(
+            index_elements=[VisitorSession.session_id],
+            set_={"last_seen_at": now},
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
 
 async def get_analytics_summary(db: AsyncSession) -> AnalyticsSummary:
     """Aggregate analytics data for the dashboard."""
+
+    # Unique visitors (all-time)
+    visitor_count = await db.scalar(
+        select(func.count()).select_from(VisitorSession)
+    )
 
     # Total questions
     q_count = await db.scalar(
@@ -165,6 +185,7 @@ async def get_analytics_summary(db: AsyncSession) -> AnalyticsSummary:
     ]
 
     return AnalyticsSummary(
+        total_unique_visitors=visitor_count or 0,
         total_questions=q_count or 0,
         total_conversations=conv_count or 0,
         total_documents=doc_count or 0,

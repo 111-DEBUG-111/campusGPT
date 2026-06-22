@@ -121,6 +121,17 @@ async def _apply_migrations(conn) -> None:
         "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'official'",
         "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS author VARCHAR(255)",
         "CREATE INDEX IF NOT EXISTS ix_dc_source_type ON document_chunks (source_type)",
+
+        # v2.1 — unique visitor tracking (chat-page sessions)
+        # Backfill from existing conversations so prior chat users are not undercounted.
+        """
+        INSERT INTO visitor_sessions (session_id, first_seen_at, last_seen_at)
+        SELECT DISTINCT session_id, MIN(created_at), MAX(updated_at)
+        FROM conversations
+        WHERE session_id IS NOT NULL
+        GROUP BY session_id
+        ON CONFLICT (session_id) DO NOTHING
+        """,
     ]
     for sql in migrations:
         await conn.execute(text(sql))

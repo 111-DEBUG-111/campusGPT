@@ -30,6 +30,10 @@ export const chatApi = {
     await apiClient.delete(`/api/conversations/${id}`);
   },
 
+  recordVisit: async (): Promise<void> => {
+    await apiClient.post('/api/visit');
+  },
+
   submitFeedback: async (
     messageId: number,
     rating: 'helpful' | 'not_helpful',
