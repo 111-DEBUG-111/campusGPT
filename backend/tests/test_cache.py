@@ -5,7 +5,6 @@ Run with:
     cd backend
     uv run pytest tests/test_cache.py -v
 """
-import pytest
 from unittest.mock import MagicMock, patch
 
 

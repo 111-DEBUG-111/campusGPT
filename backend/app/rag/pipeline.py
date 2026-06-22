@@ -1,14 +1,13 @@
 """
 Full RAG Pipeline Orchestrator for CampusGPT.
 
-Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → Gemini Response
+Combines: Query Rewriting → Hybrid Retrieval → Context Assembly → LLM Response
 Supports three Knowledge Source Modes: hybrid | official | experience
+The LLM generation step uses the LLMOrchestrator (Gemini with Groq fallback).
 """
 import logging
 import re
 import time
-from google import genai
-from google.genai import types
 from app.config import get_settings
 from app.rag.query_rewriter import rewrite_query
 from app.rag.retriever import hybrid_retrieve
@@ -19,133 +18,85 @@ settings = get_settings()
 
 
 # ─── Structured pipeline error ─────────────────────────────────────────────────
+from app.rag.errors import RagPipelineError
+from app.services.llm_service import llm_orchestrator
 
-class RagPipelineError(Exception):
+
+
+def _classify_llm_error(exc: Exception) -> RagPipelineError:
     """
-    Raised by run_rag_pipeline when a classified, user-safe error occurs.
-    Carries a clean ``user_message`` and an HTTP ``status_code`` so the
-    router can return a well-formed error response without leaking internals.
-    """
-    def __init__(self, user_message: str, status_code: int = 500):
-        super().__init__(user_message)
-        self.user_message = user_message
-        self.status_code = status_code
-
-
-# ─── Gemini error classifier ───────────────────────────────────────────────────
-
-def _classify_gemini_error(exc: Exception) -> RagPipelineError:
-    """
-    Inspect a raw Gemini / google-api exception and return a
+    Inspect an LLM / HTTP exception (from any provider) and return a
     :class:`RagPipelineError` with a friendly, actionable message.
+    Works for errors from Gemini, Groq, or any HTTP-based LLM provider.
     """
     raw = str(exc)
 
-    # ── Quota / rate-limit (HTTP 429) ─────────────────────────────────────────
-    if "429" in raw or "quota" in raw.lower() or "rate" in raw.lower():
-        # Try to pull out the retry_delay so users know how long to wait
-        match = re.search(r"retry.*?in\s+(\d+)(\.\\d+)?s", raw, re.IGNORECASE)
+    # ── Quota / rate-limit (HTTP 429 or 413 payload-too-large) ────────────────────────
+    if "429" in raw or "413" in raw or "quota" in raw.lower() or "rate" in raw.lower():
+        match = re.search(r"retry.*?in\s+(\d+)(\.\d+)?s", raw, re.IGNORECASE)
         if match:
-            wait = int(match.group(1)) + 1          # round up
+            wait = int(match.group(1)) + 1
             if wait >= 60:
                 wait_str = f"{wait // 60} min {wait % 60}s" if wait % 60 else f"{wait // 60} min"
             else:
                 wait_str = f"{wait}s"
             return RagPipelineError(
-                f"Gemini AI rate limit reached — please try again in {wait_str}.",
+                f"AI rate limit reached — please try again in {wait_str}.",
                 status_code=429,
             )
-        # Daily quota exhausted (no retry-after)
         if "GenerateRequestsPerDay" in raw or "per_day" in raw.lower() or "per day" in raw.lower():
             return RagPipelineError(
-                "Gemini AI daily quota exhausted. The free tier limit has been reached for today — "
+                "AI daily quota exhausted. The free tier limit has been reached for today — "
                 "please try again tomorrow or contact the admin.",
                 status_code=429,
             )
         return RagPipelineError(
-            "Gemini AI is temporarily rate-limited. Please wait a moment and try again.",
+            "AI is temporarily rate-limited. Please wait a moment and try again.",
             status_code=429,
         )
 
-    # ── Authentication / API key ───────────────────────────────────────────────
+    # ── Authentication / API key ─────────────────────────────────────────────────────
     if "401" in raw or "403" in raw or "API_KEY" in raw.upper() or "api key" in raw.lower():
         return RagPipelineError(
-            "Gemini AI authentication failed — the API key may be invalid or missing.",
+            "AI authentication failed — the API key may be invalid or missing.",
             status_code=503,
         )
 
-    # ── Service unavailable / server-side error ────────────────────────────────
+    # ── Service unavailable / server-side error ────────────────────────────────────────
     if "503" in raw or "502" in raw or "unavailable" in raw.lower():
         return RagPipelineError(
-            "Gemini AI is currently unavailable. Please try again in a few moments.",
+            "AI is currently unavailable. Please try again in a few moments.",
             status_code=503,
         )
 
-    # ── Safety / content blocked ───────────────────────────────────────────────
+    # ── Safety / content blocked ─────────────────────────────────────────────────────
     if "safety" in raw.lower() or "blocked" in raw.lower() or "HARM" in raw:
         return RagPipelineError(
             "Your question was blocked by the AI safety filter. Please rephrase and try again.",
             status_code=422,
         )
 
-    # ── Generic fallback ──────────────────────────────────────────────────────
+    # ── Generic fallback ────────────────────────────────────────────────────────────
     return RagPipelineError(
         "The AI model encountered an error while generating a response. Please try again.",
         status_code=500,
     )
 
 
-# ─── Gemini client singleton ───────────────────────────────────────────────────
-_gemini_client: genai.Client | None = None
+# ─── Startup warmup hook ────────────────────────────────────────────────────────────────
+# NOTE: All LLM calls go through LLMOrchestrator in llm_service.py.
+# get_gemini_model() is kept only for the startup lifespan warmup in main.py.
 
-
-def get_gemini_client() -> genai.Client:
-    """Return the singleton google.genai Client, creating it on first call."""
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
-        logger.info(f"Gemini client initialised (model: '{settings.gemini_model}').")
-    return _gemini_client
-
-
-# Keep the old name as an alias so main.py's lifespan call (`get_gemini_model()`)
-# continues to work without changes there.
-def get_gemini_model() -> genai.Client:
-    """Alias for get_gemini_client() — preserves the lifespan hook in main.py."""
-    return get_gemini_client()
-
-
-def generate_content_with_retry(
-    client: genai.Client,
-    model: str,
-    contents,
-    config: types.GenerateContentConfig,
-    max_retries: int = 3,
-    initial_delay: float = 1.0,
-) -> any:
+def get_gemini_model():
+    """Startup warmup — called by main.py lifespan to initialise the LLM orchestrator.
+    Returns the orchestrator instance; failure is non-fatal (Groq fallback still works).
     """
-    Call client.models.generate_content with exponential backoff for 503/429 transient errors.
-    """
-    delay = initial_delay
-    for attempt in range(max_retries):
-        try:
-            return client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
-            )
-        except Exception as e:
-            raw = str(e)
-            is_transient = "503" in raw or "unavailable" in raw.lower() or "429" in raw or "quota" in raw.lower() or "rate" in raw.lower()
-            if is_transient and attempt < max_retries - 1:
-                logger.warning(
-                    f"Gemini API call failed with transient error (attempt {attempt + 1}/{max_retries}): {e}. "
-                    f"Retrying in {delay:.1f}s..."
-                )
-                time.sleep(delay)
-                delay *= 2.0
-            else:
-                raise e
+    try:
+        logger.info("LLM orchestrator initialised (Gemini primary, Groq fallback).")
+        return llm_orchestrator
+    except Exception as e:
+        logger.warning(f"LLM orchestrator warmup warning: {e}")
+        return None
 
 # ─── Mode-aware system prompts ─────────────────────────────────────────────────
 
@@ -230,7 +181,7 @@ def _get_system_prompt(knowledge_mode: str) -> str:
 # ─── Context formatting ────────────────────────────────────────────────────────
 
 def format_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into a readable context block for Gemini.
+    """Format retrieved chunks into a readable context block for the LLM.
     Source type labels are included so the LLM can correctly attribute each chunk.
     """
     if not chunks:
@@ -340,27 +291,22 @@ def run_rag_pipeline(
     context = format_context(chunks)
     history_text = format_history(history)
 
-    # ── Step 4: Gemini Response (mode-aware prompt) ────────────────────────────
-    client = get_gemini_client()
-
+    # ── Step 4: Fallback LLM Response (mode-aware prompt) ──────────────────────
     system_prompt = _get_system_prompt(knowledge_mode)
     prompt = system_prompt.format(context=context, history=history_text)
     full_prompt = prompt + f"\n\nStudent question: {query}"
 
     try:
-        response = generate_content_with_retry(
-            client=client,
-            model=settings.gemini_model,
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=2048,
-            ),
+        answer, model_used = llm_orchestrator.generate_with_fallback(
+            prompt=full_prompt,
+            temperature=0.3,
+            max_tokens=2048,
         )
-        answer = response.text.strip()
     except Exception as e:
-        logger.error(f"Gemini generation failed: {e}")
-        raise _classify_gemini_error(e) from e
+        if isinstance(e, RagPipelineError):
+            raise e
+        logger.error(f"LLM generation failed: {e}")
+        raise _classify_llm_error(e) from e
 
     # ── Step 5: Citations ──────────────────────────────────────────────────────
     citations = chunks_to_citations(chunks)
@@ -374,6 +320,7 @@ def run_rag_pipeline(
         "retrieved_chunks": len(chunks),
         "query_time_ms": elapsed_ms,
         "knowledge_mode": knowledge_mode,
+        "model_used": model_used,
         # is_error=False signals to the cache layer that this result is safe
         # to store.  The cache checks this flag before every SET operation.
         "is_error": False,

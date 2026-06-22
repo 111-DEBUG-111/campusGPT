@@ -5,13 +5,13 @@ All conversation endpoints are scoped to the caller's session token.
 import json
 import logging
 import time
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.dependencies import get_session_token
 from app.limiter import limiter, is_duplicate_query
 from app.models import Conversation, Message
@@ -19,8 +19,11 @@ from app.schemas import (
     ChatRequest, ChatResponse, ConversationOut,
     ConversationListItem, MessageOut, SourceCitation
 )
-from app.rag.pipeline import run_rag_pipeline, RagPipelineError
+from app.rag.pipeline import run_rag_pipeline
+from app.rag.errors import RagPipelineError
+from app.rag.outcome_classifier import classify_query_outcome
 from app.services.analytics_service import log_event
+from app.services.knowledge_gap_service import record_knowledge_gap
 from app.cache.response_cache import get_cached_response, set_cached_response, is_cacheable
 from app.cache.kb_version import get_kb_version
 
@@ -62,6 +65,36 @@ def _cache_key_with_mode(query: str, knowledge_mode: str) -> str:
     return f"{knowledge_mode}\x00{query}"
 
 
+def _schedule_outcome_classification(
+    background_tasks: BackgroundTasks,
+    query: str,
+    answer: str,
+    retrieved_chunks: int,
+    knowledge_mode: str,
+) -> None:
+    """Classify chat outcome in the background; record knowledge gaps only."""
+
+    async def _classify_and_record() -> None:
+        try:
+            outcome = await run_in_threadpool(
+                classify_query_outcome, query, answer, retrieved_chunks
+            )
+            if outcome != "knowledge_gap":
+                logger.debug(
+                    "Outcome '%s' for query — not recording knowledge gap: %s...",
+                    outcome,
+                    query[:60],
+                )
+                return
+            async with AsyncSessionLocal() as bg_db:
+                await record_knowledge_gap(bg_db, query, knowledge_mode, answer)
+                logger.info("Knowledge gap stored for query: %s...", query[:60])
+        except Exception as e:
+            logger.error("Background outcome classification failed: %s", e)
+
+    background_tasks.add_task(_classify_and_record)
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
@@ -69,6 +102,7 @@ def _cache_key_with_mode(query: str, knowledge_mode: str) -> str:
 async def chat(
     request: Request,          # required by slowapi for IP extraction
     body: ChatRequest,         # renamed from `request` to avoid collision
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     session_token: str = Depends(get_session_token),
 ):
@@ -166,6 +200,7 @@ async def chat(
         await db.commit()
         await db.refresh(assistant_message)
 
+        model_used = cached.get("model_used", "gemini")
         await log_event(
             db=db,
             event_type="query",
@@ -175,6 +210,15 @@ async def chat(
             retrieved_chunks=cached.get("retrieved_chunks", 0),
             cache_hit=True,
             kb_version=kb_version,
+            model_used=model_used,
+        )
+
+        _schedule_outcome_classification(
+            background_tasks,
+            body.query,
+            cached["answer"],
+            cached.get("retrieved_chunks", 0),
+            effective_mode,
         )
 
         return ChatResponse(
@@ -184,6 +228,7 @@ async def chat(
             sources=sources,
             query_time_ms=cache_lookup_ms,
             knowledge_mode=effective_mode,
+            model_used=model_used,
         )
 
     # ── Cache MISS — run the full RAG pipeline ───────────────────────────────────
@@ -224,6 +269,15 @@ async def chat(
         retrieved_chunks=result["retrieved_chunks"],
         cache_hit=False,
         kb_version=kb_version,
+        model_used=result.get("model_used", "gemini"),
+    )
+
+    _schedule_outcome_classification(
+        background_tasks,
+        body.query,
+        result["answer"],
+        result["retrieved_chunks"],
+        effective_mode,
     )
 
     return ChatResponse(
@@ -233,6 +287,7 @@ async def chat(
         sources=result["sources"],
         query_time_ms=result["query_time_ms"],
         knowledge_mode=effective_mode,
+        model_used=result.get("model_used", "gemini"),
     )
 
 

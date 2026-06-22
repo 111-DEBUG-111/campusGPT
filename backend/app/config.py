@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     gemini_api_key: str
     gemini_model: str = "gemini-2.5-flash"
 
+    # ─── Fallback LLM Providers ───────────────────────────────────────────────
+    groq_api_key: str | None = None
+    groq_model: str = "qwen/qwen3-32b"
+
     # ─── Embeddings ───────────────────────────────────────────────────────────
     # bge-m3: 1024-dim, up to 8192 tokens — production quality
     # bge-small-en-v1.5: 384-dim, 512 tokens — low-memory fallback (~120MB)

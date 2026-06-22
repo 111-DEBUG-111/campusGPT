@@ -71,6 +71,7 @@ export interface ChatResponse {
   sources: SourceCitation[];
   query_time_ms: number;
   knowledge_mode?: KnowledgeMode;
+  model_used?: string;
 }
 
 // Document types
@@ -103,6 +104,16 @@ export interface AnalyticsSummary {
   top_queries: { query: string; count: number }[];
   feedback_by_day: { date: string; rating: string; count: number }[];
   questions_by_day: { date: string; count: number }[];
+}
+
+export interface KnowledgeGap {
+  id: number;
+  query: string;
+  count: number;
+  knowledge_mode: string;
+  last_answer_snippet: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
 }
 
 export const DOCUMENT_CATEGORIES = [

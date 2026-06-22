@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import type { Document, AnalyticsSummary, DocumentSourceType } from '../types';
+import type { Document, AnalyticsSummary, DocumentSourceType, KnowledgeGap } from '../types';
 import { adminApi } from '../api/admin';
 
 interface AdminState {
   documents: Document[];
   totalDocuments: number;
   analytics: AnalyticsSummary | null;
+  knowledgeGaps: KnowledgeGap[];
   isLoading: boolean;
   isUploading: boolean;
   uploadProgress: number;
@@ -24,6 +25,7 @@ interface AdminState {
   updateDocument: (id: number, patch: { source_type?: DocumentSourceType; author?: string | null; category?: string }) => Promise<void>;
   reindex: () => Promise<void>;
   loadAnalytics: () => Promise<void>;
+  loadKnowledgeGaps: () => Promise<void>;
   clearMessages: () => void;
 }
 
@@ -31,6 +33,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   documents: [],
   totalDocuments: 0,
   analytics: null,
+  knowledgeGaps: [],
   isLoading: false,
   isUploading: false,
   uploadProgress: 0,
@@ -108,6 +111,20 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       const msg = error instanceof Error ? error.message : 'Failed to load analytics';
       set({ error: msg, isLoading: false });
       // Re-throw so callers (e.g. AdminPage) can redirect on 401
+      throw error;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadKnowledgeGaps: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const knowledgeGaps = await adminApi.getKnowledgeGaps();
+      set({ knowledgeGaps });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to load knowledge gaps';
+      set({ error: msg, isLoading: false });
       throw error;
     } finally {
       set({ isLoading: false });

@@ -44,6 +44,7 @@ class ChatResponse(BaseModel):
     sources: list[SourceCitation]
     query_time_ms: float
     knowledge_mode: str = "hybrid"  # echo back the mode used
+    model_used: str = "gemini"      # model that generated the response
 
 
 class MessageOut(BaseModel):
@@ -143,6 +144,18 @@ class AnalyticsSummary(BaseModel):
 
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
+
+class KnowledgeGapOut(BaseModel):
+    id: int
+    query: str
+    count: int
+    knowledge_mode: str
+    last_answer_snippet: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+    model_config = {"from_attributes": True}
+
 
 class ReindexResponse(BaseModel):
     message: str

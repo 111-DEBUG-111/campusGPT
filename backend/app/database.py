@@ -132,6 +132,13 @@ async def _apply_migrations(conn) -> None:
         GROUP BY session_id
         ON CONFLICT (session_id) DO NOTHING
         """,
+
+        # v2.2 — knowledge gap tracking index (table created via create_all)
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_knowledge_gaps_query_normalized ON knowledge_gaps (query_normalized)",
+        "CREATE INDEX IF NOT EXISTS ix_knowledge_gaps_last_seen_at ON knowledge_gaps (last_seen_at)",
+
+        # v2.3 — LLM fallback model tracking
+        "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS model_used VARCHAR(50)",
     ]
     for sql in migrations:
         await conn.execute(text(sql))
