@@ -115,6 +115,38 @@ def get_gemini_model() -> genai.Client:
     return get_gemini_client()
 
 
+def generate_content_with_retry(
+    client: genai.Client,
+    model: str,
+    contents,
+    config: types.GenerateContentConfig,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+) -> any:
+    """
+    Call client.models.generate_content with exponential backoff for 503/429 transient errors.
+    """
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            raw = str(e)
+            is_transient = "503" in raw or "unavailable" in raw.lower() or "429" in raw or "quota" in raw.lower() or "rate" in raw.lower()
+            if is_transient and attempt < max_retries - 1:
+                logger.warning(
+                    f"Gemini API call failed with transient error (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+                delay *= 2.0
+            else:
+                raise e
+
 # ─── Mode-aware system prompts ─────────────────────────────────────────────────
 
 _SYSTEM_PROMPT_HYBRID = """You are CampusGPT, a knowledgeable and friendly AI assistant for university students.
@@ -316,7 +348,8 @@ def run_rag_pipeline(
     full_prompt = prompt + f"\n\nStudent question: {query}"
 
     try:
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=settings.gemini_model,
             contents=full_prompt,
             config=types.GenerateContentConfig(

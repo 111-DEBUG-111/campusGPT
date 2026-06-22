@@ -88,13 +88,14 @@ def rewrite_query(query: str, n: int | None = None) -> list[str]:
     """
     # Import here to avoid a circular import at module level
     # (pipeline imports rewrite_query; rewrite_query now imports get_gemini_client).
-    from app.rag.pipeline import get_gemini_client
+    from app.rag.pipeline import get_gemini_client, generate_content_with_retry
 
     n = n or settings.max_query_rewrites
 
     try:
         client = get_gemini_client()
-        response = client.models.generate_content(
+        response = generate_content_with_retry(
+            client=client,
             model=settings.gemini_model,
             contents=REWRITE_PROMPT.format(query=query, n=n),
             config=types.GenerateContentConfig(
