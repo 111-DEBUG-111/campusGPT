@@ -231,20 +231,43 @@ class BM25Index:
         else:
             self._bm25 = None
 
-    def search(self, query: str, top_k: int = 20) -> list[dict]:
-        """BM25 retrieval — returns top_k chunks with BM25 scores."""
+    def search(self, query: str, top_k: int = 20, filter_source_type: str | None = None) -> list[dict]:
+        """BM25 retrieval — returns top_k chunks with BM25 scores.
+
+        Args:
+            query: The search query string.
+            top_k: Maximum number of results to return.
+            filter_source_type: If set, only chunks with this source_type
+                are considered (pre-reranking filter for mode isolation).
+        """
         if self._bm25 is None or not self._chunks:
             return []
 
         tokenized_query = self._tokenize(query)
-        scores = self._bm25.get_scores(tokenized_query)
 
-        # Pair scores with chunk metadata
-        scored = sorted(
-            enumerate(scores),
-            key=lambda x: x[1],
-            reverse=True
-        )[:top_k]
+        # Apply source_type filter before scoring so only eligible chunks enter
+        if filter_source_type:
+            eligible_indices = [
+                i for i, c in enumerate(self._chunks)
+                if c.get("source_type", "official") == filter_source_type
+            ]
+            if not eligible_indices:
+                return []
+            # Score only eligible chunks using their original corpus tokens
+            import numpy as np  # noqa: PLC0415
+            scores_all = self._bm25.get_scores(tokenized_query)
+            scored = sorted(
+                [(i, scores_all[i]) for i in eligible_indices],
+                key=lambda x: x[1],
+                reverse=True,
+            )[:top_k]
+        else:
+            scores_all = self._bm25.get_scores(tokenized_query)
+            scored = sorted(
+                enumerate(scores_all),
+                key=lambda x: x[1],
+                reverse=True,
+            )[:top_k]
 
         results = []
         for idx, score in scored:

@@ -1,11 +1,17 @@
 import { apiClient } from './client';
-import type { ChatResponse, ConversationListItem, Conversation, Message } from '../types';
+import type { ChatResponse, ConversationListItem, Conversation } from '../types';
+import type { KnowledgeMode } from '../types';
 
 export const chatApi = {
-  sendMessage: async (query: string, conversationId?: number): Promise<ChatResponse> => {
+  sendMessage: async (
+    query: string,
+    conversationId?: number,
+    knowledgeMode?: KnowledgeMode,
+  ): Promise<ChatResponse> => {
     const { data } = await apiClient.post('/api/chat', {
       query,
       conversation_id: conversationId,
+      knowledge_mode: knowledgeMode,
     });
     return data;
   },

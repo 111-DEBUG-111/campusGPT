@@ -152,6 +152,8 @@ def ingest_pdf(
     category: str,
     chunk_size: int | None = None,       # kept for API compat; use config instead
     chunk_overlap: int | None = None,    # legacy; ignored by SemanticChunker
+    source_type: str = "official",       # "official" | "experience"
+    author: str | None = None,           # populated for experience documents
 ) -> list[ChunkDict]:
     """
     Full PDF ingestion pipeline:
@@ -207,8 +209,14 @@ def ingest_pdf(
         category=category,
     )
 
+    # Propagate Knowledge Source metadata to every chunk
+    for chunk in chunks:
+        chunk["source_type"] = source_type
+        chunk["author"] = author
+
     logger.info(
-        f"Ingested {filename}: {len(pages)} pages → {len(chunks)} semantic chunks"
+        f"Ingested {filename}: {len(pages)} pages → {len(chunks)} semantic chunks "
+        f"(source_type={source_type})"
     )
     return chunks
 
@@ -220,6 +228,8 @@ def ingest_text_file(
     category: str,
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
+    source_type: str = "official",       # "official" | "experience"
+    author: str | None = None,           # populated for experience documents
 ) -> list[ChunkDict]:
     """
     Ingest a plain text (.txt) or Markdown (.md) file.
@@ -252,5 +262,13 @@ def ingest_text_file(
         category=category,
     )
 
-    logger.info(f"Ingested text file {filename}: {len(chunks)} semantic chunks")
+    # Propagate Knowledge Source metadata to every chunk
+    for chunk in chunks:
+        chunk["source_type"] = source_type
+        chunk["author"] = author
+
+    logger.info(
+        f"Ingested text file {filename}: {len(chunks)} semantic chunks "
+        f"(source_type={source_type})"
+    )
     return chunks

@@ -25,6 +25,8 @@ class Conversation(Base):
     # NULL for legacy rows created before auth was introduced (they become invisible to users).
     session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="New Conversation")
+    # knowledge_mode: "hybrid" | "official" | "experience"
+    knowledge_mode: Mapped[str] = mapped_column(String(20), default="hybrid")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -89,6 +91,11 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # Knowledge Source Modes — added v2.0
+    # source_type: "official" | "experience"
+    source_type: Mapped[str] = mapped_column(String(20), default="official")
+    # author: populated only for experience documents
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

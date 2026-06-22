@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Document, AnalyticsSummary } from '../types';
+import type { Document, AnalyticsSummary, DocumentSourceType } from '../types';
 import { adminApi } from '../api/admin';
 
 interface AdminState {
@@ -13,8 +13,15 @@ interface AdminState {
   successMessage: string | null;
 
   loadDocuments: () => Promise<void>;
-  uploadDocument: (file: File, category: string, description: string) => Promise<void>;
+  uploadDocument: (
+    file: File,
+    category: string,
+    description: string,
+    sourceType?: DocumentSourceType,
+    author?: string,
+  ) => Promise<void>;
   deleteDocument: (id: number) => Promise<void>;
+  updateDocument: (id: number, patch: { source_type?: DocumentSourceType; author?: string | null; category?: string }) => Promise<void>;
   reindex: () => Promise<void>;
   loadAnalytics: () => Promise<void>;
   clearMessages: () => void;
@@ -45,10 +52,10 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  uploadDocument: async (file, category, description) => {
+  uploadDocument: async (file, category, description, sourceType = 'official', author) => {
     set({ isUploading: true, error: null, uploadProgress: 0 });
     try {
-      await adminApi.uploadDocument(file, category, description);
+      await adminApi.uploadDocument(file, category, description, sourceType, author);
       set({ successMessage: `"${file.name}" uploaded and queued for indexing`, uploadProgress: 100 });
       await get().loadDocuments();
     } catch (error) {
@@ -66,6 +73,17 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       await get().loadDocuments();
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Delete failed' });
+    }
+  },
+
+  updateDocument: async (id, patch) => {
+    set({ error: null });
+    try {
+      await adminApi.updateDocument(id, patch);
+      set({ successMessage: 'Document updated successfully' });
+      await get().loadDocuments();
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Update failed' });
     }
   },
 

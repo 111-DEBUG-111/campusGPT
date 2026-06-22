@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
+import { KnowledgeModeSelector } from './KnowledgeModeSelector';
 import { Bot, GraduationCap, RefreshCw } from 'lucide-react';
 
 const SUGGESTIONS = [
@@ -58,7 +59,9 @@ export const ChatWindow: React.FC = () => {
             AI Assistant • Powered by Gemini 2.5 Flash
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Knowledge Source Mode selector */}
+          <KnowledgeModeSelector />
           {/* Background refresh pill — shown only during silent cache refresh */}
           {isBackgroundRefreshing && (
             <span className="bg-refresh-pill" aria-label="Refreshing in background">

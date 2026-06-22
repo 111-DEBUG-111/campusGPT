@@ -12,6 +12,16 @@ export interface PendingConversation {
   error?: string;
 }
 
+// ── Knowledge Source Modes ──────────────────────────────────────────────────
+
+/** Three retrieval modes for Knowledge Source selection. */
+export type KnowledgeMode = 'hybrid' | 'official' | 'experience';
+
+/** Document-level source classification. */
+export type DocumentSourceType = 'official' | 'experience';
+
+// ── Citations ───────────────────────────────────────────────────────────────
+
 export interface SourceCitation {
   document_id: string;
   filename: string;
@@ -23,6 +33,9 @@ export interface SourceCitation {
   section_title?: string | null;
   section_path?: string | null;
   chunk_type?: string | null;
+  // Knowledge Source metadata — added v2.0
+  source_type?: 'official' | 'experience' | null;
+  author?: string | null;
 }
 
 export interface Message {
@@ -39,6 +52,8 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   messages: Message[];
+  /** Knowledge mode stored on this conversation. Returned by GET /conversations/{id}. */
+  knowledge_mode?: KnowledgeMode;
 }
 
 export interface ConversationListItem {
@@ -55,6 +70,7 @@ export interface ChatResponse {
   answer: string;
   sources: SourceCitation[];
   query_time_ms: number;
+  knowledge_mode?: KnowledgeMode;
 }
 
 // Document types
@@ -67,6 +83,9 @@ export interface Document {
   chunk_count: number;
   status: 'pending' | 'indexing' | 'indexed' | 'error';
   file_size_bytes: number;
+  // Knowledge Source metadata — added v2.0
+  source_type: DocumentSourceType;
+  author?: string | null;
   uploaded_at: string;
   indexed_at: string | null;
 }

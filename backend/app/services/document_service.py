@@ -74,6 +74,8 @@ async def process_document(
     filename: str,
     category: str,
     db: AsyncSession,
+    source_type: str = "official",
+    author: str | None = None,
 ) -> int:
     """
     Background processing: download from R2 → ingest → embed → upsert into pgvector → update BM25.
@@ -102,11 +104,13 @@ async def process_document(
             # ── Ingest ──────────────────────────────────────────────────────────
             if suffix == ".pdf":
                 chunks = await run_in_threadpool(
-                    ingest_pdf, tmp_path, document_id, filename, category
+                    ingest_pdf, tmp_path, document_id, filename, category,
+                    None, None, source_type, author,
                 )
             elif suffix in (".txt", ".md"):
                 chunks = await run_in_threadpool(
-                    ingest_text_file, tmp_path, document_id, filename, category
+                    ingest_text_file, tmp_path, document_id, filename, category,
+                    None, None, source_type, author,
                 )
             else:
                 raise ValueError(f"Unsupported file type: {suffix}")
@@ -199,6 +203,57 @@ async def delete_document(document_id: int, db: AsyncSession) -> None:
         await run_in_threadpool(bm25.save_to_disk, new_version)
 
     logger.info(f"Document {document_id} (key={doc.filename}) deleted (kb_version={new_version})")
+
+
+async def update_document_source(
+    document_id: int,
+    source_type: str,
+    author: str | None,
+    category: str | None,
+    db: AsyncSession,
+) -> None:
+    """
+    Update a document's source_type, author, and optionally category.
+    Also re-propagates the metadata to all chunks in pgvector and BM25,
+    then flushes the response cache immediately.
+    """
+    from sqlalchemy import text as sqla_text  # avoid shadowing at module level
+    from app.cache.response_cache import flush_response_cache
+
+    # ── Build update values ───────────────────────────────────────────────────
+    update_vals: dict = {"source_type": source_type, "author": author}
+    if category is not None:
+        update_vals["category"] = category
+
+    await db.execute(
+        update(Document)
+        .where(Document.id == document_id)
+        .values(**update_vals)
+    )
+    await db.commit()
+
+    # ── Propagate to pgvector chunks ─────────────────────────────────────────
+    vectorstore = get_vectorstore()
+    await run_in_threadpool(
+        vectorstore.update_source_metadata, document_id, source_type, author
+    )
+
+    # ── Propagate to in-memory BM25 index ────────────────────────────────────
+    bm25 = get_bm25_index()
+    for chunk in bm25._chunks:
+        if chunk.get("document_id") == document_id:
+            chunk["source_type"] = source_type
+            chunk["author"] = author
+
+    # ── Flush response cache immediately ─────────────────────────────────────
+    # A source type change means previously cached responses may now be
+    # served under the wrong mode — flush immediately per user preference.
+    await run_in_threadpool(flush_response_cache)
+    new_version = await run_in_threadpool(bump_kb_version)
+    logger.info(
+        f"Document {document_id} source updated: source_type={source_type}, "
+        f"author={author}, cache flushed (kb_version={new_version})"
+    )
 
 
 async def rebuild_bm25_from_vectorstore() -> int:
