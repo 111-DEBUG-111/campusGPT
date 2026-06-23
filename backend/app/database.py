@@ -17,8 +17,8 @@ engine = create_async_engine(
     # pool_pre_ping detects dropped connections (Neon idles out after 5 min)
     pool_pre_ping=True,
     # Neon free tier allows ~10 concurrent connections
-    pool_size=5,
-    max_overflow=10,
+    pool_size=2,
+    max_overflow=3,
     # asyncpg requires ssl via connect_args, NOT as a URL query param.
     # Strip ?sslmode=... / ?ssl=... / ?channel_binding=... from DATABASE_URL.
     connect_args={"ssl": "require"},
