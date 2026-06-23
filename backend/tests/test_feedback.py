@@ -80,7 +80,7 @@ class TestFeedbackSystem(unittest.IsolatedAsyncioTestCase):
             comment="Not detailed"
         )
 
-        fb = await submit_feedback(request=mock_request, body=req, db=mock_db)
+        fb = await submit_feedback(request=mock_request, body=req, db=mock_db, session_token="mock_session_token")
 
         # Verify new feedback record has snapshot fields populated
         self.assertEqual(fb.message_id, 123)
@@ -146,13 +146,43 @@ class TestFeedbackSystem(unittest.IsolatedAsyncioTestCase):
             comment="New feedback"
         )
 
-        fb = await submit_feedback(request=mock_request, body=req, db=mock_db)
+        fb = await submit_feedback(request=mock_request, body=req, db=mock_db, session_token="mock_session_token")
 
         # Verify duplicate was returned and no new record was added
         self.assertEqual(fb.id, 999)
         self.assertEqual(fb.comment, "Old feedback")
         mock_db.add.assert_not_called()
         mock_db.commit.assert_not_called()
+
+    async def test_submit_feedback_bola_prevention(self):
+        mock_db = AsyncMock()
+
+        # Mock db execute returns None for the message select query
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=lambda: None)
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/feedback",
+            "headers": Headers().raw,
+            "client": ("127.0.0.1", 12345),
+            "app": MagicMock(),
+        }
+        mock_request = Request(scope)
+
+        req = FeedbackRequest(
+            message_id=999,
+            rating="helpful",
+            comment="Should fail"
+        )
+
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException) as ctx:
+            await submit_feedback(request=mock_request, body=req, db=mock_db, session_token="unauthorized_session")
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "Message not found")
+        mock_db.add.assert_not_called()
 
     async def test_get_negative_feedback_admin(self):
         mock_db = AsyncMock()

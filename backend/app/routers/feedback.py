@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.database import get_db
-from app.dependencies import verify_admin_cookie
+from app.dependencies import verify_admin_cookie, get_session_token
 from app.limiter import limiter
 from app.models import Feedback, Message, Conversation
 from app.schemas import (
@@ -24,11 +24,15 @@ async def submit_feedback(
     request: Request,          # required by slowapi for IP extraction
     body: FeedbackRequest,     # renamed from `request` to avoid collision
     db: AsyncSession = Depends(get_db),
+    session_token: str = Depends(get_session_token),
 ):
     """Submit helpful/not-helpful feedback for an assistant message."""
-    # Verify message exists
+    # Verify message exists and belongs to the user's session
     result = await db.execute(
-        select(Message).where(Message.id == body.message_id)
+        select(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Message.id == body.message_id)
+        .where(Conversation.session_id == session_token)
     )
     message = result.scalar_one_or_none()
     if not message:
