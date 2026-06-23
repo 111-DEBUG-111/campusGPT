@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
@@ -21,6 +22,12 @@ from app.schemas import (
 )
 from app.rag.pipeline import run_rag_pipeline
 from app.rag.errors import RagPipelineError
+from app.services.progress_service import (
+    update_progress,
+    get_session_progress,
+    STAGE_COMPLETE,
+    STATUS_COMPLETED,
+)
 from app.rag.outcome_classifier import classify_query_outcome
 from app.services.analytics_service import log_event
 from app.services.knowledge_gap_service import record_knowledge_gap
@@ -181,6 +188,13 @@ async def chat(
 
     if cached is not None:
         # ── Cache HIT ──────────────────────────────────────────────────────────────
+        update_progress(
+            conversation_id=conversation.id,
+            session_id=session_token,
+            request_id=body.request_id,
+            stage=STAGE_COMPLETE,
+            status=STATUS_COMPLETED,
+        )
         logger.info(
             "Cache HIT for query '%s...' mode=%s (%.1f ms lookup)",
             body.query[:40],
@@ -234,7 +248,13 @@ async def chat(
     # ── Cache MISS — run the full RAG pipeline ───────────────────────────────────
     try:
         result = await run_in_threadpool(
-            run_rag_pipeline, body.query, history, effective_mode
+            run_rag_pipeline,
+            body.query,
+            history,
+            effective_mode,
+            conversation.id,
+            session_token,
+            body.request_id,
         )
     except RagPipelineError as e:
         logger.error(f"RAG pipeline error [{e.status_code}]: {e.user_message}")
@@ -324,6 +344,17 @@ async def list_conversations(
     ]
 
 
+@router.get("/conversations/progress")
+async def get_active_progress(
+    request: Request,          # required by slowapi for IP extraction
+    session_token: str = Depends(get_session_token),
+):
+    """
+    Get active progress for all conversations in the caller's session.
+    """
+    return get_session_progress(session_token)
+
+
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)
 @limiter.limit("60/minute")   # read-only — relaxed
 async def get_conversation(
@@ -338,6 +369,7 @@ async def get_conversation(
     msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
+        .options(selectinload(Message.feedback))
         .order_by(Message.created_at.asc())
     )
     messages = msg_result.scalars().all()
@@ -355,6 +387,9 @@ async def get_conversation(
                 content=m.content,
                 sources=[SourceCitation(**s) for s in m.sources],
                 created_at=m.created_at,
+                feedback_given=m.feedback_given,
+                feedback_type=m.feedback_type,
+                feedback_timestamp=m.feedback_timestamp,
             )
             for m in messages
         ],
@@ -373,3 +408,6 @@ async def delete_conversation(
     conv = await _get_owned_conversation(conversation_id, session_token, db)
     await db.delete(conv)
     await db.commit()
+
+
+

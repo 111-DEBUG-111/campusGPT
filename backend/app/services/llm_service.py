@@ -40,7 +40,12 @@ class GeminiProvider(BaseLLMProvider):
 
     def _get_client(self) -> genai.Client:
         if self.client is None:
-            self.client = genai.Client(api_key=settings.gemini_api_key)
+            self.client = genai.Client(
+                api_key=settings.gemini_api_key,
+                http_options=types.HttpOptions(
+                    retry_options=types.HttpRetryOptions(attempts=1)
+                )
+            )
         return self.client
 
     def generate(

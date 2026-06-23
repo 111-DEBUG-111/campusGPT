@@ -51,7 +51,7 @@ class Message(Base):
 
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
     feedback: Mapped[list["Feedback"]] = relationship(
-        "Feedback", back_populates="message", cascade="all, delete-orphan"
+        "Feedback", back_populates="message", passive_deletes=True
     )
 
     @property
@@ -60,6 +60,18 @@ class Message(Base):
             return json.loads(self.sources_json)
         return []
 
+    @property
+    def feedback_given(self) -> bool:
+        return len(self.feedback) > 0
+
+    @property
+    def feedback_type(self) -> str | None:
+        return self.feedback[0].rating if self.feedback else None
+
+    @property
+    def feedback_timestamp(self) -> datetime | None:
+        return self.feedback[0].created_at if self.feedback else None
+
 
 # --- Feedback -----------------------------------------------------------------
 
@@ -67,14 +79,22 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    message_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    message_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    rating: Mapped[str] = mapped_column(String(10))
+    rating: Mapped[str] = mapped_column(String(20))
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    message: Mapped["Message"] = relationship("Message", back_populates="feedback")
+    # Immutable snapshots for administrative review
+    conversation_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    conversation_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assistant_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    message: Mapped["Message | None"] = relationship("Message", back_populates="feedback")
 
 
 # --- Document -----------------------------------------------------------------

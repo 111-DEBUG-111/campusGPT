@@ -54,6 +54,8 @@ def _mode_to_source_filter(knowledge_mode: str) -> str | None:
     return None  # hybrid — no filter
 
 
+from typing import Callable
+
 def hybrid_retrieve(
     query: str,
     queries: list[str] | None = None,
@@ -61,6 +63,7 @@ def hybrid_retrieve(
     top_k_vector: int | None = None,
     top_k_rerank: int | None = None,
     knowledge_mode: str = "hybrid",
+    on_rerank_start: Callable[[], None] | None = None,
 ) -> list[dict]:
     """
     Full hybrid retrieval pipeline:
@@ -133,6 +136,11 @@ def hybrid_retrieve(
 
     # Rerank the fused candidates
     logger.info(f"Reranking {len(unique_fused)} fused candidates → top {top_k_rerank}")
+    if on_rerank_start is not None:
+        try:
+            on_rerank_start()
+        except Exception as e:
+            logger.error(f"Error in on_rerank_start callback: {e}")
     final_chunks = reranker.rerank(query, unique_fused, top_k=top_k_rerank)
 
     return final_chunks

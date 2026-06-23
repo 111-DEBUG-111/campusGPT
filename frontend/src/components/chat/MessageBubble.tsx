@@ -68,7 +68,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         )}
 
         {/* Feedback buttons (assistant only) */}
-        {!isUser && <FeedbackButtons messageId={message.id} />}
+        {!isUser && <FeedbackButtons key={message.id} message={message} />}
 
         {/* Timestamp */}
         <span className="message-timestamp">

@@ -139,6 +139,21 @@ async def _apply_migrations(conn) -> None:
 
         # v2.3 — LLM fallback model tracking
         "ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS model_used VARCHAR(50)",
+
+        # v2.4 — feedback system improvements: add review columns and adjust cascades
+        "ALTER TABLE feedback ALTER COLUMN rating TYPE VARCHAR(20)",
+        "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS conversation_id INTEGER",
+        "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS conversation_title VARCHAR(255)",
+        "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_question TEXT",
+        "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS assistant_response TEXT",
+        "ALTER TABLE feedback ALTER COLUMN message_id DROP NOT NULL",
+        "ALTER TABLE feedback DROP CONSTRAINT IF EXISTS feedback_message_id_fkey",
+        "ALTER TABLE feedback ADD CONSTRAINT feedback_message_id_fkey FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL",
+        "ALTER TABLE feedback DROP CONSTRAINT IF EXISTS feedback_conversation_id_fkey",
+        "ALTER TABLE feedback ADD CONSTRAINT feedback_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_feedback_conversation_id ON feedback (conversation_id)",
+        "CREATE INDEX IF NOT EXISTS ix_feedback_rating ON feedback (rating)",
+        "CREATE INDEX IF NOT EXISTS ix_feedback_created_at ON feedback (created_at)",
     ]
     for sql in migrations:
         await conn.execute(text(sql))

@@ -1,22 +1,26 @@
 import React, { useState } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
+import type { Message } from '../../types';
 
 interface FeedbackButtonsProps {
-  messageId: number;
+  message: Message;
 }
 
-export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({ messageId }) => {
-  const [submitted, setSubmitted] = useState<'helpful' | 'not_helpful' | null>(null);
+export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({ message }) => {
+  const [submitted, setSubmitted] = useState<'helpful' | 'not_helpful' | null>(
+    message.feedback_given ? (message.feedback_type as 'helpful' | 'not_helpful' || null) : null
+  );
   const submitFeedback = useChatStore((s) => s.submitFeedback);
 
   const handleFeedback = async (rating: 'helpful' | 'not_helpful') => {
     if (submitted) return;
+    setSubmitted(rating);
     try {
-      await submitFeedback(messageId, rating);
-      setSubmitted(rating);
+      await submitFeedback(message.id, rating);
     } catch (error) {
       console.error('Feedback submission failed:', error);
+      setSubmitted(null); // Rollback on failure
     }
   };
 

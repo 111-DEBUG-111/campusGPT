@@ -14,6 +14,69 @@ const SUGGESTIONS = [
   { icon: '💻', text: 'How do I find internship opportunities?', category: 'internships' },
 ];
 
+interface ProgressPanelProps {
+  stageKey: string;
+  status: string;
+  errorMessage: string | null;
+}
+
+const RAG_STAGES = [
+  { key: 'Rewriting Query', label: 'Rewriting query', icon: '🔄' },
+  { key: 'Retrieving Documents', label: 'Retrieving relevant documents', icon: '🔍' },
+  { key: 'Reranking Results', label: 'Reranking sources', icon: '🎯' },
+  { key: 'Generating Response', label: 'Generating answer', icon: '✍️' },
+];
+
+const RAGProgressPanel: React.FC<ProgressPanelProps> = ({
+  stageKey,
+  status,
+  errorMessage,
+}) => {
+  const currentStageIndex = RAG_STAGES.findIndex(s => s.key === stageKey);
+  const activeIndex = stageKey === 'Complete' ? RAG_STAGES.length : (currentStageIndex === -1 ? 0 : currentStageIndex);
+
+  return (
+    <div className="rag-progress-panel">
+      {RAG_STAGES.map((stage, idx) => {
+        let state: 'completed' | 'active' | 'pending' | 'failed' = 'pending';
+        if (idx < activeIndex) {
+          state = 'completed';
+        } else if (idx === activeIndex) {
+          if (status === 'failed') {
+            state = 'failed';
+          } else {
+            state = 'active';
+          }
+        }
+
+        return (
+          <div key={stage.key} className={`rag-progress-row rag-stage-${state}`}>
+            <span className="rag-stage-icon">
+              {state === 'completed' && <span className="rag-icon-completed">✅</span>}
+              {state === 'failed' && <span className="rag-icon-failed">❌</span>}
+              {state === 'active' && (
+                <span className="rag-icon-active inline-block animate-pulse">
+                  {stage.icon}
+                </span>
+              )}
+              {state === 'pending' && <span className="rag-icon-pending opacity-35">{stage.icon}</span>}
+            </span>
+            <span className="rag-stage-label">
+              {stage.label}
+              {state === 'active' && '...'}
+            </span>
+            {state === 'failed' && errorMessage && (
+              <span className="rag-stage-error-text">
+                ({errorMessage})
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export const ChatWindow: React.FC = () => {
   const {
     activeConversation,
@@ -21,6 +84,8 @@ export const ChatWindow: React.FC = () => {
     isLoading,
     isBackgroundRefreshing,
     pendingMessages,
+    pendingRequests,
+    progress,
     sendMessage,
     error,
     clearError,
@@ -28,8 +93,26 @@ export const ChatWindow: React.FC = () => {
 
   // The optimistic message for this specific conversation (survives chat switches).
   // Uses sentinel key 0 for the "new chat" pane where activeConversationId is null.
-  const pendingUserMessage = pendingMessages[activeConversationId ?? 0] ?? null;
+  const convKey = activeConversationId ?? 0;
+  const pendingUserMessage = pendingMessages[convKey] ?? null;
   const isProcessing = pendingUserMessage !== null;
+
+  // Retrieve current request ID and progress state
+  const currentRequestId = pendingRequests[convKey] ?? null;
+  const activeProgressState = currentRequestId
+    ? Object.values(progress).find(p => p.request_id === currentRequestId)
+    : null;
+
+  console.log("[RAG Progress] ChatWindow state:", {
+    currentRequestId,
+    progress,
+    activeProgressState,
+    convKey
+  });
+
+  const currentStageKey = activeProgressState?.stage || 'Rewriting Query';
+  const currentStatus = activeProgressState?.status || 'in_progress';
+  const progressErrorMessage = activeProgressState?.error_message ?? null;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasMessages =
@@ -106,21 +189,18 @@ export const ChatWindow: React.FC = () => {
               </div>
             )}
 
-            {/* Typing indicator — shown whenever this conversation has a pending message */}
+            {/* Progress Panel — shown while a response is processing */}
             {isProcessing && (
               <div className="message-bubble-wrapper message-assistant">
                 <div className="avatar avatar-bot">
                   <Bot size={16} />
                 </div>
                 <div className="message-content-wrapper">
-                  <div className="typing-indicator">
-                    <div className="typing-dot" />
-                    <div className="typing-dot" />
-                    <div className="typing-dot" />
-                  </div>
-                  <span style={{ color: '#475569', fontSize: '11px', marginTop: '4px' }}>
-                    CampusGPT is thinking…
-                  </span>
+                  <RAGProgressPanel
+                    stageKey={currentStageKey}
+                    status={currentStatus}
+                    errorMessage={progressErrorMessage}
+                  />
                 </div>
               </div>
             )}

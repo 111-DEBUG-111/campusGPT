@@ -99,6 +99,49 @@ export const AnalyticsDashboard: React.FC<Props> = ({ analytics }) => {
         />
       </div>
 
+      {/* Feedback Metrics */}
+      <h3 className="font-semibold text-lg mt-8 mb-4 flex items-center gap-2" style={{ color: '#f1f5f9' }}>
+        <ThumbsUp size={18} style={{ color: '#10b981' }} />
+        Feedback Analytics
+      </h3>
+      <div className="stats-grid">
+        <StatCard
+          icon={<MessageSquare size={20} />}
+          label="Total Feedback"
+          value={feedbackTotal}
+          iconBg="rgba(99, 102, 241, 0.15)"
+          iconColor="#6366f1"
+        />
+        <StatCard
+          icon={<ThumbsUp size={20} />}
+          label="Helpful Responses"
+          value={analytics.helpful_count}
+          iconBg="rgba(16, 185, 129, 0.15)"
+          iconColor="#10b981"
+        />
+        <StatCard
+          icon={<ThumbsDown size={20} />}
+          label="Not Helpful Responses"
+          value={analytics.not_helpful_count}
+          iconBg="rgba(239, 68, 68, 0.15)"
+          iconColor="#ef4444"
+        />
+        <StatCard
+          icon={<TrendingUp size={20} />}
+          label="Positive Feedback %"
+          value={`${helpfulPct}%`}
+          iconBg="rgba(16, 185, 129, 0.15)"
+          iconColor="#10b981"
+        />
+        <StatCard
+          icon={<TrendingUp size={20} />}
+          label="Negative Feedback %"
+          value={`${feedbackTotal > 0 ? 100 - helpfulPct : 0}%`}
+          iconBg="rgba(239, 68, 68, 0.15)"
+          iconColor="#ef4444"
+        />
+      </div>
+
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Questions per day */}
