@@ -7,7 +7,7 @@ services:
     # no dependency resolver needed, every version is already exact.
     # To regenerate the lock after changing pyproject.toml:
     #   cd backend && uv pip compile pyproject.toml --python-version 3.11 --output-file requirements.lock
-    buildCommand: pip install uv && uv pip install --system -r requirements.lock
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75 --log-level info
     plan: free
     envVars:
