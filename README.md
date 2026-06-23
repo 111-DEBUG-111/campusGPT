@@ -157,11 +157,17 @@ CampusGPT is designed to run efficiently on free tiers, utilizing optimization l
 
 *Visual walkthrough of the client and administrative dashboards:*
 
-| User Chat Interface & Citations | Admin Portal & Live Analytics |
-|---|---|
-| ![Chat UI](https://raw.githubusercontent.com/google/antigravity/main/docs/images/chat_ui_placeholder.png) | ![Admin UI](https://raw.githubusercontent.com/google/antigravity/main/docs/images/admin_ui_placeholder.png) |
+**User Chat Interface & Citations**
 
-*(Note: Replace these URLs with real images after capturing snapshots of your deployment).*
+<img width="1000" height="520" alt="Screenshot 2026-06-23 at 4 44 28 PM" src="https://github.com/user-attachments/assets/965ee442-f79a-4bf8-b33a-d28149679532" />
+
+<img width="1241" height="729" alt="Screenshot 2026-06-23 at 4 45 25 PM" src="https://github.com/user-attachments/assets/6c2e6ea6-6ef5-4c91-8a83-aa576f408dae" />
+
+---
+
+**Admin Portal & Live Analytics**
+
+<img width="1000" height="520" alt="Screenshot 2026-06-23 at 4 45 44 PM" src="https://github.com/user-attachments/assets/6685d728-2890-42a4-9176-b2387f0f3fb4" />
 
 ---
 
