@@ -530,6 +530,26 @@ export const useChatStore = create<ChatState>()(
 
       submitFeedback: async (messageId, rating) => {
         await chatApi.submitFeedback(messageId, rating);
+        const { activeConversation } = get();
+        if (activeConversation) {
+          const updatedMessages = activeConversation.messages.map((m) => {
+            if (m.id === messageId) {
+              return {
+                ...m,
+                feedback_given: true,
+                feedback_type: rating,
+                feedback_timestamp: new Date().toISOString(),
+              };
+            }
+            return m;
+          });
+          const updatedConversation = {
+            ...activeConversation,
+            messages: updatedMessages,
+          };
+          set({ activeConversation: updatedConversation });
+          setCached(activeConversation.id, updatedConversation);
+        }
       },
 
       clearError: () => {

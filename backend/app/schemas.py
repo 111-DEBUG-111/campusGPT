@@ -54,6 +54,9 @@ class MessageOut(BaseModel):
     content: str
     sources: list[SourceCitation]
     created_at: datetime
+    feedback_given: bool = False
+    feedback_type: Optional[str] = None
+    feedback_timestamp: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -121,11 +124,32 @@ class FeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     id: int
-    message_id: int
+    message_id: Optional[int] = None
     rating: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class NegativeFeedbackOut(BaseModel):
+    id: int
+    message_id: Optional[int] = None
+    conversation_id: Optional[int] = None
+    created_at: datetime
+    conversation_title: Optional[str] = None
+    user_question: Optional[str] = None
+    assistant_response: Optional[str] = None
+    rating: str
+
+    model_config = {"from_attributes": True}
+
+
+class PaginatedNegativeFeedbackResponse(BaseModel):
+    items: list[NegativeFeedbackOut]
+    total: int
+    page: int
+    pages: int
+    limit: int
 
 
 # ─── Analytics ────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Document, AnalyticsSummary, DocumentSourceType, KnowledgeGap } from '../types';
+import type { Document, AnalyticsSummary, DocumentSourceType, KnowledgeGap, PaginatedNegativeFeedbackResponse } from '../types';
 import { adminApi } from '../api/admin';
 
 interface AdminState {
@@ -7,6 +7,7 @@ interface AdminState {
   totalDocuments: number;
   analytics: AnalyticsSummary | null;
   knowledgeGaps: KnowledgeGap[];
+  negativeFeedback: PaginatedNegativeFeedbackResponse | null;
   isLoading: boolean;
   isUploading: boolean;
   uploadProgress: number;
@@ -26,6 +27,7 @@ interface AdminState {
   reindex: () => Promise<void>;
   loadAnalytics: () => Promise<void>;
   loadKnowledgeGaps: () => Promise<void>;
+  loadNegativeFeedback: (page?: number, limit?: number, search?: string) => Promise<void>;
   clearMessages: () => void;
 }
 
@@ -34,6 +36,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   totalDocuments: 0,
   analytics: null,
   knowledgeGaps: [],
+  negativeFeedback: null,
   isLoading: false,
   isUploading: false,
   uploadProgress: 0,
@@ -124,6 +127,20 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       set({ knowledgeGaps });
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to load knowledge gaps';
+      set({ error: msg, isLoading: false });
+      throw error;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadNegativeFeedback: async (page = 1, limit = 10, search = '') => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await adminApi.getNegativeFeedback(page, limit, search);
+      set({ negativeFeedback: response });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to load negative feedback';
       set({ error: msg, isLoading: false });
       throw error;
     } finally {

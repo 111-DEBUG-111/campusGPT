@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { Document, AnalyticsSummary, KnowledgeGap } from '../types';
+import type { Document, AnalyticsSummary, KnowledgeGap, PaginatedNegativeFeedbackResponse } from '../types';
 import type { DocumentSourceType } from '../types';
 
 interface DocumentListResponse {
@@ -74,6 +74,20 @@ export const adminApi = {
 
   getKnowledgeGaps: async (): Promise<KnowledgeGap[]> => {
     const { data } = await apiClient.get('/api/admin/knowledge-gaps');
+    return data;
+  },
+
+  getNegativeFeedback: async (
+    page: number = 1,
+    limit: number = 10,
+    search: string = ''
+  ): Promise<PaginatedNegativeFeedbackResponse> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    if (search) params.append('search', search);
+
+    const { data } = await apiClient.get(`/api/admin/feedback/negative?${params.toString()}`);
     return data;
   },
 };

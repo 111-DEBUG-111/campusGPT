@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
   GraduationCap, Upload, FileText, BarChart2,
-  ArrowLeft, RefreshCw, Loader2, AlertCircle, CheckCircle, HelpCircle
+  ArrowLeft, RefreshCw, Loader2, AlertCircle, CheckCircle, HelpCircle, ThumbsDown
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DocumentUpload } from '../components/admin/DocumentUpload';
 import { DocumentList } from '../components/admin/DocumentList';
 import { AnalyticsDashboard } from '../components/admin/AnalyticsDashboard';
 import { KnowledgeGapsList } from '../components/admin/KnowledgeGapsList';
+import { NegativeFeedbackList } from '../components/admin/NegativeFeedbackList';
 import { useAdminStore } from '../stores/adminStore';
 
-type Tab = 'upload' | 'documents' | 'gaps' | 'analytics';
+type Tab = 'upload' | 'documents' | 'gaps' | 'feedback' | 'analytics';
 
 const AdminPage: React.FC = () => {
   const navigate = useNavigate();
@@ -19,8 +20,10 @@ const AdminPage: React.FC = () => {
     loadDocuments,
     loadAnalytics,
     loadKnowledgeGaps,
+    loadNegativeFeedback,
     analytics,
     knowledgeGaps,
+    negativeFeedback,
     isLoading,
     error,
     successMessage,
@@ -33,7 +36,7 @@ const AdminPage: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        await Promise.all([loadDocuments(), loadAnalytics(), loadKnowledgeGaps()]);
+        await Promise.all([loadDocuments(), loadAnalytics(), loadKnowledgeGaps(), loadNegativeFeedback(1, 10, '')]);
       } catch (err: any) {
         if (err?.message?.includes('401') || err?.message?.toLowerCase().includes('session')) {
           navigate('/admin/login');
@@ -54,6 +57,7 @@ const AdminPage: React.FC = () => {
     { id: 'documents', label: 'Documents', icon: <FileText size={15} /> },
     { id: 'upload', label: 'Upload', icon: <Upload size={15} /> },
     { id: 'gaps', label: 'Knowledge Gaps', icon: <HelpCircle size={15} /> },
+    { id: 'feedback', label: 'Negative Feedback', icon: <ThumbsDown size={15} /> },
     { id: 'analytics', label: 'Analytics', icon: <BarChart2 size={15} /> },
   ];
 
@@ -77,7 +81,7 @@ const AdminPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             className="btn btn-secondary text-xs"
-            onClick={() => { loadDocuments(); loadAnalytics(); loadKnowledgeGaps(); }}
+            onClick={() => { loadDocuments(); loadAnalytics(); loadKnowledgeGaps(); loadNegativeFeedback(1, 10, ''); }}
             aria-label="Refresh data"
           >
             <RefreshCw size={12} />
@@ -113,6 +117,8 @@ const AdminPage: React.FC = () => {
               setActiveTab(tab.id);
               if (tab.id === 'gaps') {
                 loadKnowledgeGaps();
+              } else if (tab.id === 'feedback') {
+                loadNegativeFeedback(1, 10, '');
               }
             }}
           >
@@ -140,6 +146,10 @@ const AdminPage: React.FC = () => {
             isLoading={isLoading && knowledgeGaps.length === 0}
             onUploadClick={() => setActiveTab('upload')}
           />
+        )}
+
+        {activeTab === 'feedback' && (
+          <NegativeFeedbackList />
         )}
 
         {activeTab === 'analytics' && (

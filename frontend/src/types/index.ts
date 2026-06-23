@@ -54,6 +54,9 @@ export interface Message {
   content: string;
   sources: SourceCitation[];
   created_at: string;
+  feedback_given?: boolean;
+  feedback_type?: 'helpful' | 'not_helpful' | null;
+  feedback_timestamp?: string | null;
 }
 
 export interface Conversation {
@@ -138,3 +141,22 @@ export const DOCUMENT_CATEGORIES = [
 ] as const;
 
 export type DocumentCategory = (typeof DOCUMENT_CATEGORIES)[number];
+
+export interface NegativeFeedback {
+  id: number;
+  message_id: number | null;
+  conversation_id: number | null;
+  created_at: string;
+  conversation_title: string | null;
+  user_question: string | null;
+  assistant_response: string | null;
+  rating: string;
+}
+
+export interface PaginatedNegativeFeedbackResponse {
+  items: NegativeFeedback[];
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+}

@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
@@ -368,6 +369,7 @@ async def get_conversation(
     msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
+        .options(selectinload(Message.feedback))
         .order_by(Message.created_at.asc())
     )
     messages = msg_result.scalars().all()
@@ -385,6 +387,9 @@ async def get_conversation(
                 content=m.content,
                 sources=[SourceCitation(**s) for s in m.sources],
                 created_at=m.created_at,
+                feedback_given=m.feedback_given,
+                feedback_type=m.feedback_type,
+                feedback_timestamp=m.feedback_timestamp,
             )
             for m in messages
         ],
