@@ -112,7 +112,7 @@ export const ChatWindow: React.FC = () => {
 
   const currentStageKey = activeProgressState?.stage || 'Rewriting Query';
   const currentStatus = activeProgressState?.status || 'in_progress';
-  const progressErrorMessage = activeProgressState?.error_message;
+  const progressErrorMessage = activeProgressState?.error_message ?? null;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasMessages =
