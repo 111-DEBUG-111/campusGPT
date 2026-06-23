@@ -2,11 +2,13 @@
 CampusGPT SQLAlchemy Database Setup
 Uses asyncpg for async PostgreSQL (Neon) support.
 """
+import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 engine = create_async_engine(
@@ -57,17 +59,17 @@ async def _apply_migrations(conn) -> None:
         """,
 
         # v1.2 — document_chunks table for pgvector storage
-        # Created here (not via ORM) so we can use the `vector(1024)` column
+        # Created here (not via ORM) so we can use the `vector(X)` column
         # type without requiring the pgvector Python package in SQLAlchemy.
-        # Hardcoded dim=1024 for BAAI/bge-m3.
-        """
+        # Dynamically sized based on settings.vector_dimension.
+        f"""
         CREATE TABLE IF NOT EXISTS document_chunks (
             id             VARCHAR(36)   PRIMARY KEY,
             document_id    INTEGER       NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
             filename       VARCHAR(255)  NOT NULL,
             category       VARCHAR(100)  NOT NULL,
             text           TEXT          NOT NULL,
-            embedding      vector(1024)  NOT NULL,
+            embedding      vector({settings.vector_dimension})  NOT NULL,
             page_number    INTEGER,
             chunk_index    INTEGER       NOT NULL DEFAULT 0,
             section_title  VARCHAR(500),
@@ -164,15 +166,47 @@ async def init_db() -> None:
     Initialise the database:
       1. Enable the pgvector extension (must happen before create_all so
          the `vector` column type is available when creating document_chunks).
-      2. Create all missing tables via SQLAlchemy metadata.
-      3. Apply incremental column / index migrations.
+      2. Verify pgvector table dimensions and drop table to migrate if mismatch exists.
+      3. Create all missing tables via SQLAlchemy metadata.
+      4. Apply incremental column / index migrations.
     """
     async with engine.begin() as conn:
         # Step 1 — pgvector extension (idempotent)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        # Step 2 — create tables
+
+        # Step 2 — Verify pgvector table dimensions
+        table_exists = await conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'document_chunks'
+            )
+        """))
+        if table_exists.scalar():
+            col_type_res = await conn.execute(text("""
+                SELECT format_type(atttypid, atttypmod) 
+                FROM pg_attribute 
+                WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'
+            """))
+            col_type = col_type_res.scalar()
+            target_type = f"vector({settings.vector_dimension})"
+            if col_type and target_type not in col_type:
+                logger.warning(
+                    f"Vector dimension mismatch: Database has '{col_type}', "
+                    f"config expects '{target_type}'. Dropping document_chunks table "
+                    f"to recreate with correct dimension."
+                )
+                await conn.execute(text("DROP TABLE IF EXISTS document_chunks CASCADE"))
+                await conn.execute(text("""
+                    UPDATE documents 
+                       SET status = 'pending', 
+                           chunk_count = 0, 
+                           indexed_at = NULL,
+                           error_message = 'Vector dimension mismatch - requires re-indexing'
+                """))
+
+        # Step 3 — create tables
         await conn.run_sync(Base.metadata.create_all)
-        # Step 3 — incremental migrations
+        # Step 4 — incremental migrations
         await _apply_migrations(conn)
 
 

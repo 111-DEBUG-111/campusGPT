@@ -10,8 +10,8 @@ sys.modules['nltk'] = fake_nltk
 
 from app.config import get_settings
 s = get_settings()
-assert s.chunk_size == 800, f'Expected 800, got {s.chunk_size}'
-assert s.embedding_model == 'BAAI/bge-m3', f'Expected bge-m3, got {s.embedding_model}'
+assert s.chunk_size == 768, f'Expected 768, got {s.chunk_size}'
+assert s.embedding_model == 'gemini-embedding-001', f'Expected gemini-embedding-001, got {s.embedding_model}'
 assert s.chunk_min_tokens == 80, f'Expected 80, got {s.chunk_min_tokens}'
 print(f'config OK: chunk_size={s.chunk_size}, model={s.embedding_model}, min_tokens={s.chunk_min_tokens}')
 

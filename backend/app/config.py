@@ -32,13 +32,15 @@ class Settings(BaseSettings):
     groq_model: str = "qwen/qwen3-32b"
 
     # ─── Embeddings ───────────────────────────────────────────────────────────
-    # bge-m3: 1024-dim, up to 8192 tokens — production quality
-    # bge-small-en-v1.5: 384-dim, 512 tokens — low-memory fallback (~120MB)
-    embedding_model: str = "BAAI/bge-m3"
+    # BAAI/bge-m3: 1024-dim, up to 8192 tokens — production quality
+    # BAAI/bge-small-en-v1.5: 384-dim, 512 tokens — low-memory fallback (~120MB)
+    # gemini-embedding-001: 768-dim (default), 2048 tokens — hosted Google Gemini embeddings
+    embedding_model: str = "gemini-embedding-001"
 
     # ─── Reranker ─────────────────────────────────────────────────────────────
     reranker_model: str = "BAAI/bge-reranker-base"
     reranker_top_k: int = 5
+    disable_reranker: bool = True
 
     # ─── Model Cache (HuggingFace) ────────────────────────────────────────────
     # Path where HuggingFace model weights are cached (HF_HOME env var).
@@ -49,9 +51,9 @@ class Settings(BaseSettings):
     hf_home: str = "/tmp/hf_cache"
 
     # ─── pgvector ─────────────────────────────────────────────────────────────
-    # Hardcoded to 1024 for BAAI/bge-m3.  If you switch embedding models,
+    # Hardcoded to 768 for gemini-embedding-001. If you switch embedding models,
     # the document_chunks.embedding column must be dropped and recreated.
-    vector_dimension: int = 1024
+    vector_dimension: int = 768
 
     # ─── BM25 ─────────────────────────────────────────────────────────────────
     bm25_top_k: int = 20
@@ -76,9 +78,10 @@ class Settings(BaseSettings):
 
     # ─── Chunking ─────────────────────────────────────────────────────────────
     # Tune these together based on your embedding model:
+    #   gemini-embedding-001 (2048 token ctx) → chunk_size=768, chunk_min_tokens=80
     #   bge-m3  (8192 token ctx)  → chunk_size=800, chunk_min_tokens=80
     #   bge-small (512 token ctx) → chunk_size=400, chunk_min_tokens=40
-    chunk_size: int = 800          # target tokens per semantic chunk
+    chunk_size: int = 768          # target tokens per semantic chunk
     chunk_overlap: int = 0         # legacy — semantic chunker uses sentence overlap instead
     chunk_min_tokens: int = 80     # minimum tokens; smaller chunks discarded as noise
 

@@ -135,12 +135,15 @@ def hybrid_retrieve(
             unique_fused.append(chunk)
 
     # Rerank the fused candidates
-    logger.info(f"Reranking {len(unique_fused)} fused candidates → top {top_k_rerank}")
-    if on_rerank_start is not None:
-        try:
-            on_rerank_start()
-        except Exception as e:
-            logger.error(f"Error in on_rerank_start callback: {e}")
+    if settings.disable_reranker:
+        logger.info(f"Reranking disabled. Selecting top {top_k_rerank} fused candidates directly.")
+    else:
+        logger.info(f"Reranking {len(unique_fused)} fused candidates → top {top_k_rerank}")
+        if on_rerank_start is not None:
+            try:
+                on_rerank_start()
+            except Exception as e:
+                logger.error(f"Error in on_rerank_start callback: {e}")
     final_chunks = reranker.rerank(query, unique_fused, top_k=top_k_rerank)
 
     return final_chunks
