@@ -5,7 +5,6 @@ Uses BAAI/bge-reranker-base (~400MB) by default.
 Override via RERANKER_MODEL env var.
 """
 import logging
-from FlagEmbedding import FlagReranker
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +20,7 @@ class Reranker:
     """
 
     def __init__(self):
+        from FlagEmbedding import FlagReranker
         logger.info(f"Loading reranker: {settings.reranker_model}")
         self.model = FlagReranker(settings.reranker_model, use_fp16=True)
         logger.info("Reranker loaded ✓")
