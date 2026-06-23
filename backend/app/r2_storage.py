@@ -125,7 +125,7 @@ async def get_presigned_url(key: str, expiry_seconds: int = 3600) -> str:
     async with _client() as s3:
         url = await s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.r2_bucket_name, "Key": key},
+            Params={"Bucket": settings.storage_bucket_name, "Key": key},
             ExpiresIn=expiry_seconds,
         )
     return url
