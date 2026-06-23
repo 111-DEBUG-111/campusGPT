@@ -9,7 +9,6 @@ import time
 import psutil
 import os
 from typing import Union
-from FlagEmbedding import FlagModel
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -57,6 +56,7 @@ class Embedder:
     """
 
     def __init__(self):
+        from FlagEmbedding import FlagModel
         mem_before = get_memory_usage()
         logger.info(f"Loading embedding model: {settings.embedding_model}")
         logger.info(f"Memory before: {mem_before['rss_mb']:.1f}MB")
