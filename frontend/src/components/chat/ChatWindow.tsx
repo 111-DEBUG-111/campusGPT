@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { KnowledgeModeSelector } from './KnowledgeModeSelector';
 import { Bot, GraduationCap, RefreshCw } from 'lucide-react';
+import { CreatorProfile } from './CreatorProfile';
 
 const SUGGESTIONS = [
   { icon: '🎓', text: 'What is the minimum attendance requirement?', category: 'academics' },
@@ -156,6 +157,9 @@ export const ChatWindow: React.FC = () => {
           <span style={{ color: '#475569', fontSize: '12px' }}>Online</span>
         </div>
       </div>
+
+      {/* Mobile Creator Profile Banner */}
+      <CreatorProfile view="mobile" />
 
       {/* Messages */}
       <div className="chat-messages">

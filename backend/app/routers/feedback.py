@@ -26,56 +26,63 @@ async def submit_feedback(
     db: AsyncSession = Depends(get_db),
     session_token: str = Depends(get_session_token),
 ):
-    """Submit helpful/not-helpful feedback for an assistant message."""
-    # Verify message exists and belongs to the user's session
-    result = await db.execute(
-        select(Message)
-        .join(Conversation, Message.conversation_id == Conversation.id)
-        .where(Message.id == body.message_id)
-        .where(Conversation.session_id == session_token)
-    )
-    message = result.scalar_one_or_none()
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found")
+    """Submit helpful/not-helpful feedback for an assistant message or general feedback."""
+    if body.message_id is not None:
+        # Verify message exists and belongs to the user's session
+        result = await db.execute(
+            select(Message)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .where(Message.id == body.message_id)
+            .where(Conversation.session_id == session_token)
+        )
+        message = result.scalar_one_or_none()
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
 
-    if message.role != "assistant":
-        raise HTTPException(status_code=400, detail="Can only rate assistant messages")
+        if message.role != "assistant":
+            raise HTTPException(status_code=400, detail="Can only rate assistant messages")
 
-    # Prevent duplicate submissions for the same message
-    existing_result = await db.execute(
-        select(Feedback).where(Feedback.message_id == body.message_id)
-    )
-    existing_feedback = existing_result.scalar_one_or_none()
-    if existing_feedback:
-        # Return existing state and skip logging duplicates
-        return existing_feedback
+        # Prevent duplicate submissions for the same message
+        existing_result = await db.execute(
+            select(Feedback).where(Feedback.message_id == body.message_id)
+        )
+        existing_feedback = existing_result.scalar_one_or_none()
+        if existing_feedback:
+            # Return existing state and skip logging duplicates
+            return existing_feedback
 
-    # Retrieve conversation title and preceding user message at this moment
-    conversation_id = message.conversation_id
-    conversation_title = None
-    user_question = None
-    assistant_response = message.content
+        # Retrieve conversation title and preceding user message at this moment
+        conversation_id = message.conversation_id
+        conversation_title = None
+        user_question = None
+        assistant_response = message.content
 
-    # Get conversation
-    conv_result = await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conversation = conv_result.scalar_one_or_none()
-    if conversation:
-        conversation_title = conversation.title
+        # Get conversation
+        conv_result = await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = conv_result.scalar_one_or_none()
+        if conversation:
+            conversation_title = conversation.title
 
-    # Get preceding user message
-    user_msg_result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .where(Message.role == "user")
-        .where(Message.created_at < message.created_at)
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
-    user_msg = user_msg_result.scalar_one_or_none()
-    if user_msg:
-        user_question = user_msg.content
+        # Get preceding user message
+        user_msg_result = await db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .where(Message.role == "user")
+            .where(Message.created_at < message.created_at)
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        user_msg = user_msg_result.scalar_one_or_none()
+        if user_msg:
+            user_question = user_msg.content
+    else:
+        # General suggestion / feedback from Meet the Creator modal
+        conversation_id = None
+        conversation_title = "General Suggestion"
+        user_question = "N/A"
+        assistant_response = "N/A"
 
     # Store feedback with immutable snapshot fields
     feedback = Feedback(

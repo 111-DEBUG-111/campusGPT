@@ -42,7 +42,7 @@ export const chatApi = {
   },
 
   submitFeedback: async (
-    messageId: number,
+    messageId: number | null,
     rating: 'helpful' | 'not_helpful',
     comment?: string
   ): Promise<void> => {

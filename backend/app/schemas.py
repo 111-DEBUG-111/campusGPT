@@ -117,7 +117,7 @@ class DocumentUpdate(BaseModel):
 # ─── Feedback ─────────────────────────────────────────────────────────────────
 
 class FeedbackRequest(BaseModel):
-    message_id: int
+    message_id: Optional[int] = None
     rating: str = Field(..., pattern="^(helpful|not_helpful)$")
     comment: Optional[str] = Field(None, max_length=500)
 
@@ -140,6 +140,7 @@ class NegativeFeedbackOut(BaseModel):
     user_question: Optional[str] = None
     assistant_response: Optional[str] = None
     rating: str
+    comment: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

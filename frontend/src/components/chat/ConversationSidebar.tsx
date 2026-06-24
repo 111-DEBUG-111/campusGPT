@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import type { PendingConversationStatus } from '../../types';
+import { CreatorProfile } from './CreatorProfile';
 
 interface ConversationSidebarProps {
   onAdminClick: () => void;
@@ -282,6 +283,9 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({ onAdmi
             </p>
           )}
         </div>
+
+        {/* Creator Profile */}
+        <CreatorProfile view="sidebar" />
 
         {/* Footer */}
         <div className="sidebar-footer">
