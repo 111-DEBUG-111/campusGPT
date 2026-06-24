@@ -93,9 +93,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({ citation, index }) =
           <span className="citation-index">[{index}]</span>
           <ChunkTypeIcon chunkType={citation.chunk_type} />
           <span className="citation-filename" title={citation.filename}>
-            {citation.filename.length > 35
-              ? citation.filename.substring(0, 35) + '…'
-              : citation.filename}
+            {citation.filename}
           </span>
           {citation.page_number && (
             <span className="citation-page">p. {citation.page_number}</span>

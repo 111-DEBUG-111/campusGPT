@@ -129,14 +129,7 @@ export const DocumentUpload: React.FC = () => {
           <label className="form-label" htmlFor="doc-source-type">
             Knowledge Source <span style={{ color: '#ef4444', marginLeft: '2px' }}>*</span>
           </label>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '8px',
-              marginTop: '6px',
-            }}
-          >
+          <div className="upload-source-options">
             {/* Official option */}
             <button
               type="button"

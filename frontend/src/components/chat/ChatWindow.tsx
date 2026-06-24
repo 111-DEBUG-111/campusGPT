@@ -256,7 +256,7 @@ const WelcomeScreen: React.FC<{ onSuggestion: (text: string) => void }> = ({
     </div>
     <h1 className="welcome-title">CampusGPT</h1>
     <p className="welcome-subtitle">
-      Your AI-powered campus companion. Ask me anything about academics,
+      Your AI companion for life at NST & Rishihood University. Ask me anything about academics,
       placements, clubs, hostel life, or university policies.
     </p>
     <div className="suggestion-grid">
