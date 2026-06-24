@@ -40,12 +40,15 @@ async def admin_login(body: LoginRequest, response: Response):
         # Constant-time-ish: don't leak timing information
         raise HTTPException(status_code=401, detail="Invalid admin key")
 
+    secure_cookie = not settings.debug
+    samesite_val = "none" if secure_cookie else "lax"
+
     response.set_cookie(
         key=COOKIE_NAME,
         value=body.key,
         httponly=True,
-        secure=not settings.debug,  # True in prod (HTTPS), False in local dev (HTTP)
-        samesite="lax",
+        secure=secure_cookie,
+        samesite=samesite_val,
         max_age=COOKIE_MAX_AGE,
         path="/",
     )
@@ -56,6 +59,16 @@ async def admin_login(body: LoginRequest, response: Response):
 @router.post("/logout")
 async def admin_logout(response: Response):
     """Clear the admin session cookie."""
-    response.delete_cookie(key=COOKIE_NAME, path="/")
+    secure_cookie = not settings.debug
+    samesite_val = "none" if secure_cookie else "lax"
+
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        secure=secure_cookie,
+        samesite=samesite_val,
+        httponly=True,
+    )
     logger.info("Admin session ended")
     return {"ok": True}
+
