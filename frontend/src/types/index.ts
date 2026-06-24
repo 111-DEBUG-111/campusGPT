@@ -151,6 +151,7 @@ export interface NegativeFeedback {
   user_question: string | null;
   assistant_response: string | null;
   rating: string;
+  comment: string | null;
 }
 
 export interface PaginatedNegativeFeedbackResponse {

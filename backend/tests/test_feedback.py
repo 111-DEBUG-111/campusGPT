@@ -232,3 +232,43 @@ class TestFeedbackSystem(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.total, 1)
         self.assertEqual(res.items[0].user_question, "Q1")
         self.assertEqual(res.page, 1)
+
+    @patch("app.routers.feedback.log_event", new_callable=AsyncMock)
+    async def test_submit_general_feedback_happy_path(self, mock_log_event):
+        # Setup mock db
+        mock_db = AsyncMock()
+
+        # Create a real Starlette Request object to satisfy slowapi
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/feedback",
+            "headers": Headers().raw,
+            "client": ("127.0.0.1", 12345),
+            "app": MagicMock(),
+        }
+        mock_request = Request(scope)
+
+        # Submit general feedback (message_id is None)
+        req = FeedbackRequest(
+            message_id=None,
+            rating="not_helpful",
+            comment="This is a general suggestion."
+        )
+
+        fb = await submit_feedback(request=mock_request, body=req, db=mock_db, session_token="mock_session_token")
+
+        # Verify new feedback record has snapshot fields populated
+        self.assertIsNone(fb.message_id)
+        self.assertEqual(fb.rating, "not_helpful")
+        self.assertEqual(fb.comment, "This is a general suggestion.")
+        self.assertIsNone(fb.conversation_id)
+        self.assertEqual(fb.conversation_title, "General Suggestion")
+        self.assertEqual(fb.user_question, "N/A")
+        self.assertEqual(fb.assistant_response, "N/A")
+
+        # Verify database commands called
+        mock_db.add.assert_called_once()
+        mock_db.commit.assert_called_once()
+        mock_db.refresh.assert_called_once()
+        mock_log_event.assert_called_once_with(db=mock_db, event_type="feedback", query="not_helpful")

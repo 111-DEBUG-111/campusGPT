@@ -171,6 +171,27 @@ export const NegativeFeedbackList: React.FC = () => {
                           <td></td>
                           <td colSpan={4} className="docs-table-td p-5">
                             <div className="space-y-4">
+                              {/* User Comment / Suggestion */}
+                              {item.comment && (
+                                <div className="rounded-xl p-4 mb-4" style={{ background: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
+                                      User Comment / Suggestion
+                                    </span>
+                                    <button
+                                      className="btn btn-secondary text-xs py-1 px-2 flex items-center gap-1"
+                                      onClick={() => copyToClipboard(item.comment || '', `${item.id}-c`)}
+                                    >
+                                      {copiedId === `${item.id}-c` ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+                                      {copiedId === `${item.id}-c` ? 'Copied' : 'Copy Feedback'}
+                                    </button>
+                                  </div>
+                                  <p className="text-sm font-medium" style={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+                                    {item.comment}
+                                  </p>
+                                </div>
+                              )}
+
                               {/* User Question */}
                               <div className="rounded-xl p-4" style={{ background: '#16181f', border: '1px solid #222533' }}>
                                 <div className="flex items-center justify-between mb-2">

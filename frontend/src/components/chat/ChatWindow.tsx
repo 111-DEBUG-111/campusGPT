@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { KnowledgeModeSelector } from './KnowledgeModeSelector';
 import { Bot, GraduationCap, RefreshCw } from 'lucide-react';
+import { CreatorProfile } from './CreatorProfile';
 
 const SUGGESTIONS = [
   { icon: '🎓', text: 'What is the minimum attendance requirement?', category: 'academics' },
@@ -157,6 +158,9 @@ export const ChatWindow: React.FC = () => {
         </div>
       </div>
 
+      {/* Mobile Creator Profile Banner */}
+      <CreatorProfile view="mobile" />
+
       {/* Messages */}
       <div className="chat-messages">
         {showSkeleton ? (
@@ -256,7 +260,7 @@ const WelcomeScreen: React.FC<{ onSuggestion: (text: string) => void }> = ({
     </div>
     <h1 className="welcome-title">CampusGPT</h1>
     <p className="welcome-subtitle">
-      Your AI-powered campus companion. Ask me anything about academics,
+      Your AI companion for life at NST & Rishihood University. Ask me anything about academics,
       placements, clubs, hostel life, or university policies.
     </p>
     <div className="suggestion-grid">

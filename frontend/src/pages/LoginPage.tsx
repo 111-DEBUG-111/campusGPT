@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GraduationCap, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { GraduationCap, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi } from '../api/admin';
 
@@ -106,11 +106,17 @@ const LoginPage: React.FC = () => {
               'Access Dashboard'
             )}
           </button>
-        </form>
 
-        <p className="text-xs text-center mt-6" style={{ color: '#2a2d3a' }}>
-          Set via <code>ADMIN_API_KEY</code> environment variable
-        </p>
+          <button
+            id="admin-back-btn"
+            type="button"
+            className="btn btn-secondary w-full justify-center py-3"
+            onClick={() => navigate('/')}
+            disabled={loading}
+          >
+            <ArrowLeft size={16} /> Back to Home
+          </button>
+        </form>
       </div>
     </div>
   );

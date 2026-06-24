@@ -85,7 +85,7 @@ const AdminPage: React.FC = () => {
             aria-label="Refresh data"
           >
             <RefreshCw size={12} />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </button>
           <button
             id="back-to-chat-btn"
@@ -93,7 +93,7 @@ const AdminPage: React.FC = () => {
             onClick={() => navigate('/')}
           >
             <ArrowLeft size={12} />
-            Back to Chat
+            <span className="hidden sm:inline">Back to Chat</span>
           </button>
         </div>
       </div>
