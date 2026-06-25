@@ -85,7 +85,7 @@ export const KnowledgeModeSelector: React.FC = () => {
             }}
           >
             <span style={{ fontSize: '12px', lineHeight: 1 }}>{mode.icon}</span>
-            <span>{mode.label}</span>
+            <span className="hidden sm:inline">{mode.label}</span>
           </button>
         );
       })}

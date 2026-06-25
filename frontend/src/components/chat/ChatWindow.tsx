@@ -140,7 +140,8 @@ export const ChatWindow: React.FC = () => {
             {activeConversation?.title ?? 'CampusGPT'}
           </p>
           <p className="chat-topbar-subtitle">
-            AI Assistant • Powered by Gemini 2.5 Flash
+            <span className="hidden sm:inline">AI Assistant • Powered by Gemini 2.5 Flash</span>
+            <span className="sm:hidden">AI Assistant</span>
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -154,7 +155,7 @@ export const ChatWindow: React.FC = () => {
             </span>
           )}
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span style={{ color: '#475569', fontSize: '12px' }}>Online</span>
+          <span style={{ color: '#475569', fontSize: '12px' }} className="hidden sm:inline">Online</span>
         </div>
       </div>
 
@@ -255,25 +256,27 @@ const WelcomeScreen: React.FC<{ onSuggestion: (text: string) => void }> = ({
   onSuggestion,
 }) => (
   <div className="welcome-screen">
-    <div className="welcome-logo">
-      <GraduationCap size={40} color="white" />
-    </div>
-    <h1 className="welcome-title">CampusGPT</h1>
-    <p className="welcome-subtitle">
-      Your AI companion for life at NST & Rishihood University. Ask me anything about academics,
-      placements, clubs, hostel life, or university policies.
-    </p>
-    <div className="suggestion-grid">
-      {SUGGESTIONS.map((s, i) => (
-        <button
-          key={i}
-          className="suggestion-chip"
-          onClick={() => onSuggestion(s.text)}
-        >
-          <span className="suggestion-chip-icon">{s.icon}</span>
-          <span className="suggestion-chip-text">{s.text}</span>
-        </button>
-      ))}
+    <div className="welcome-inner flex flex-col items-center w-full my-auto">
+      <div className="welcome-logo">
+        <GraduationCap size={40} color="white" />
+      </div>
+      <h1 className="welcome-title">CampusGPT</h1>
+      <p className="welcome-subtitle">
+        Your AI companion for life at NST & Rishihood University. Ask me anything about academics,
+        placements, clubs, hostel life, or university policies.
+      </p>
+      <div className="suggestion-grid">
+        {SUGGESTIONS.map((s, i) => (
+          <button
+            key={i}
+            className="suggestion-chip"
+            onClick={() => onSuggestion(s.text)}
+          >
+            <span className="suggestion-chip-icon">{s.icon}</span>
+            <span className="suggestion-chip-text">{s.text}</span>
+          </button>
+        ))}
+      </div>
     </div>
   </div>
 );
