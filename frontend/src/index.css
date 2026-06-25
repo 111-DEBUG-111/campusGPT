@@ -204,7 +204,7 @@ body {
 
 /* ─── Welcome Screen ─────────────────────────────────────────────────────── */
 .welcome-screen {
-  @apply flex flex-col items-center justify-center h-full px-6 text-center;
+  @apply flex flex-col items-center min-h-full px-6 py-8 text-center;
   animation: fadeIn 0.5s ease-out;
 }
 
@@ -786,11 +786,38 @@ body {
   .sidebar-overlay {
     @apply fixed inset-0 z-40 bg-black/60 backdrop-blur-sm;
   }
-  .suggestion-grid {
-    @apply grid-cols-1;
-  }
   .chat-topbar {
-    padding-left: 3.5rem;
+    padding-left: 4rem;
+    padding-right: 1rem;
+  }
+
+  .welcome-logo {
+    width: 4rem;
+    height: 4rem;
+    margin-bottom: 1rem;
+  }
+  .welcome-title {
+    @apply text-3xl mb-2;
+  }
+  .welcome-subtitle {
+    @apply text-sm mb-6;
+  }
+  .suggestion-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    gap: 12px;
+    padding: 6px 0;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .suggestion-grid::-webkit-scrollbar {
+    display: none;
+  }
+  .suggestion-chip {
+    flex: 0 0 auto;
+    width: 220px;
   }
 }
 

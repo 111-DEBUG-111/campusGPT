@@ -22,7 +22,7 @@ interface CreatorProfileProps {
 
 export const CreatorProfile: React.FC<CreatorProfileProps> = ({ view }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState<'story' | 'why' | 'roadmap' | 'feedback'>('story');
 
   const [comment, setComment] = useState('');
@@ -399,7 +399,7 @@ export const CreatorProfile: React.FC<CreatorProfileProps> = ({ view }) => {
                   {/* Optional Portfolio */}
                   <div className="mt-3 text-center">
                     <a
-                      href="https://dva-portfolio-blush.vercel.app/"
+                      href="https://gen-ai-portfolio-taupe.vercel.app/"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
