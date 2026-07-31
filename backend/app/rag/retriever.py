@@ -64,6 +64,7 @@ def hybrid_retrieve(
     top_k_rerank: int | None = None,
     knowledge_mode: str = "hybrid",
     on_rerank_start: Callable[[], None] | None = None,
+    use_reranker: bool | None = None,
 ) -> list[dict]:
     """
     Full hybrid retrieval pipeline:
@@ -82,6 +83,7 @@ def hybrid_retrieve(
         top_k_vector: Vector candidates per query (default: settings.vector_top_k)
         top_k_rerank: Final chunks after reranking (default: settings.reranker_top_k)
         knowledge_mode: "hybrid" | "official" | "experience"
+        use_reranker: Per-call reranker override (default: settings.disable_reranker)
 
     Returns:
         Final ranked list of chunk dicts with relevance scores.
@@ -135,7 +137,8 @@ def hybrid_retrieve(
             unique_fused.append(chunk)
 
     # Rerank the fused candidates
-    if settings.disable_reranker:
+    rerank_enabled = (not settings.disable_reranker) if use_reranker is None else use_reranker
+    if not rerank_enabled:
         logger.info(f"Reranking disabled. Selecting top {top_k_rerank} fused candidates directly.")
     else:
         logger.info(f"Reranking {len(unique_fused)} fused candidates → top {top_k_rerank}")
@@ -144,6 +147,8 @@ def hybrid_retrieve(
                 on_rerank_start()
             except Exception as e:
                 logger.error(f"Error in on_rerank_start callback: {e}")
-    final_chunks = reranker.rerank(query, unique_fused, top_k=top_k_rerank)
+    final_chunks = reranker.rerank(
+        query, unique_fused, top_k=top_k_rerank, use_reranker=use_reranker
+    )
 
     return final_chunks

@@ -266,6 +266,14 @@ def run_rag_pipeline(
     conversation_id: int | None = None,
     session_id: str | None = None,
     request_id: str | None = None,
+    *,
+    max_context_chunks: int | None = None,
+    top_k_bm25: int | None = None,
+    top_k_vector: int | None = None,
+    n_query_rewrites: int | None = None,
+    use_reranker: bool | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> dict:
     """
     Full RAG pipeline.
@@ -277,6 +285,21 @@ def run_rag_pipeline(
         conversation_id: ID of the conversation
         session_id: session token of the user
         request_id: Client-side generated request UUID
+
+    Tuning overrides (keyword-only, all optional):
+        Each defaults to None, meaning "use the configured env/settings value".
+        They exist so an evaluation harness can sweep configurations within a
+        single process instead of restarting with a different .env.  Callers
+        that pass nothing get exactly the previous behaviour.
+
+        max_context_chunks: Final chunks fed to the LLM (env: MAX_CONTEXT_CHUNKS)
+        top_k_bm25: BM25 candidates per query (env: BM25_TOP_K)
+        top_k_vector: Vector candidates per query (env: VECTOR_TOP_K)
+        n_query_rewrites: Query expansion variants (env: MAX_QUERY_REWRITES);
+            pass 0 to skip expansion entirely
+        use_reranker: Force the cross-encoder on/off (env: DISABLE_RERANKER)
+        temperature: Generation temperature (default 0.3)
+        max_tokens: Generation token cap (default 2048)
 
     Returns:
         {
@@ -305,8 +328,13 @@ def run_rag_pipeline(
     logger.info(f"RAG pipeline started for query: {query[:80]}... (mode={knowledge_mode})")
     emit_stage(STAGE_REWRITING, STATUS_IN_PROGRESS)
     try:
-        rewritten_queries = rewrite_query(query)
-        logger.info(f"Query rewrites: {rewritten_queries}")
+        if n_query_rewrites == 0:
+            # Explicitly disabled for this call — retrieve on the raw query only.
+            rewritten_queries = []
+            logger.info("Query rewriting skipped (n_query_rewrites=0)")
+        else:
+            rewritten_queries = rewrite_query(query, n=n_query_rewrites)
+            logger.info(f"Query rewrites: {rewritten_queries}")
     except Exception as e:
         logger.error(f"RAG pipeline failed during query rewriting: {e}")
         emit_stage(STAGE_REWRITING, STATUS_FAILED, "Failed during retrieval")
@@ -324,9 +352,12 @@ def run_rag_pipeline(
         chunks = hybrid_retrieve(
             query=query,
             queries=rewritten_queries,
-            top_k_rerank=settings.max_context_chunks,
+            top_k_bm25=top_k_bm25,
+            top_k_vector=top_k_vector,
+            top_k_rerank=max_context_chunks or settings.max_context_chunks,
             knowledge_mode=knowledge_mode,
             on_rerank_start=on_rerank_start,
+            use_reranker=use_reranker,
         )
         logger.info(f"Retrieved {len(chunks)} final chunks after reranking (mode={knowledge_mode})")
     except Exception as e:
@@ -350,8 +381,8 @@ def run_rag_pipeline(
     try:
         answer, model_used = llm_orchestrator.generate_with_fallback(
             prompt=full_prompt,
-            temperature=0.3,
-            max_tokens=2048,
+            temperature=0.3 if temperature is None else temperature,
+            max_tokens=max_tokens or 2048,
         )
     except Exception as e:
         emit_stage(STAGE_GENERATING, STATUS_FAILED, "Failed during generation")
