@@ -274,6 +274,7 @@ def run_rag_pipeline(
     use_reranker: bool | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    include_debug: bool = False,
 ) -> dict:
     """
     Full RAG pipeline.
@@ -300,6 +301,12 @@ def run_rag_pipeline(
         use_reranker: Force the cross-encoder on/off (env: DISABLE_RERANKER)
         temperature: Generation temperature (default 0.3)
         max_tokens: Generation token cap (default 2048)
+        include_debug: When True, add the raw retrieved chunk list to the result
+            under "chunks" — full untruncated text, rank order intact, one entry
+            per retrieved chunk.  Evaluation harnesses need this: the "sources"
+            citations truncate chunk_text to 300 chars, which destroys the
+            evidence needed to score faithfulness.  Off by default so the API
+            response and cache payload are unchanged.
 
     Returns:
         {
@@ -399,7 +406,7 @@ def run_rag_pipeline(
 
     emit_stage(STAGE_COMPLETE, STATUS_COMPLETED)
 
-    return {
+    result = {
         "answer": answer,
         "sources": citations,
         "retrieved_chunks": len(chunks),
@@ -410,3 +417,11 @@ def run_rag_pipeline(
         # to store.  The cache checks this flag before every SET operation.
         "is_error": False,
     }
+
+    if include_debug:
+        # Raw chunks, deliberately not passed through chunks_to_citations —
+        # that truncates text to 300 chars.  Rank order is preserved as returned
+        # by retrieval.
+        result["chunks"] = chunks
+
+    return result

@@ -220,6 +220,10 @@ export const ChatWindow: React.FC = () => {
             style={{ cursor: 'pointer' }}
           >
             ⚠️ {error} — Click to dismiss
+            <div className="alert-error-hint">
+              The server may have been asleep. Send your question again — it usually works on the
+              second or third try.
+            </div>
           </div>
         )}
 
@@ -264,6 +268,10 @@ const WelcomeScreen: React.FC<{ onSuggestion: (text: string) => void }> = ({
       <p className="welcome-subtitle">
         Your AI companion for life at NST & Rishihood University. Ask me anything about academics,
         placements, clubs, hostel life, or university policies.
+      </p>
+      <p className="cold-start-notice">
+        💤 The server sleeps when idle, so the first answer can take up to a minute. If nothing comes
+        back, just send your question again — it wakes up after a try or two.
       </p>
       <div className="suggestion-grid">
         {SUGGESTIONS.map((s, i) => (

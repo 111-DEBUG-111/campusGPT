@@ -229,6 +229,15 @@ body {
   line-height: 1.6;
 }
 
+/* Free-tier backend spins down when idle — set expectations before the first query. */
+.cold-start-notice {
+  @apply text-xs mb-6 max-w-md rounded-xl px-4 py-3;
+  background-color: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
 .suggestion-grid {
   @apply grid grid-cols-2 gap-3 w-full max-w-lg;
 }
@@ -743,6 +752,11 @@ body {
   @apply flex items-start gap-3 px-4 py-3 rounded-xl text-sm;
 }
 .alert-error { background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #fca5a5; }
+.alert-error-hint {
+  @apply text-xs mt-1.5;
+  color: #94a3b8;
+  line-height: 1.5;
+}
 .alert-success { background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #6ee7b7; }
 
 /* ─── Form Elements ──────────────────────────────────────────────────────── */
@@ -801,6 +815,9 @@ body {
   }
   .welcome-subtitle {
     @apply text-sm mb-6;
+  }
+  .cold-start-notice {
+    @apply mb-4 px-3 py-2;
   }
   .suggestion-grid {
     display: flex;
